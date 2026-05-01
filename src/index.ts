@@ -1,0 +1,130 @@
+import pc from "picocolors";
+import { fetchRelay, fetchSchedule, todayDate } from "./api.ts";
+import { renderScheduleList } from "./render.ts";
+import { watch } from "./watch.ts";
+
+interface Args {
+  cmd: "today" | "watch";
+  date: string;
+  team?: string;
+  game?: string;
+  intervalSec: number;
+  debug: boolean;
+  help: boolean;
+}
+
+function parseArgs(argv: string[]): Args {
+  const args: Args = {
+    cmd: "today",
+    date: todayDate(),
+    intervalSec: 5,
+    debug: false,
+    help: false,
+  };
+  const positional: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]!;
+    if (a === "--help" || a === "-h") args.help = true;
+    else if (a === "--debug") args.debug = true;
+    else if (a === "--team") args.team = argv[++i];
+    else if (a === "--game") args.game = argv[++i];
+    else if (a === "--date") args.date = argv[++i] ?? args.date;
+    else if (a === "--interval") args.intervalSec = Math.max(1, Number(argv[++i]) || 5);
+    else if (!a.startsWith("--")) positional.push(a);
+  }
+  if (positional[0] === "watch") args.cmd = "watch";
+  else if (positional[0] === "today" || positional[0] === undefined) args.cmd = "today";
+  return args;
+}
+
+function printHelp(): void {
+  console.log(`${pc.bold("kbo")} — KBO 라이브 중계 TUI
+
+사용법:
+  kbo                          오늘 경기 목록
+  kbo today --date 2026-05-01  특정 날짜 경기 목록
+  kbo watch                    진행중 경기 라이브 중계 (자동 선택)
+  kbo watch --team LG          팀 자동 선택
+  kbo watch --game <gameId>    특정 게임 ID
+
+옵션:
+  --interval <sec>   폴링 주기 (기본 5)
+  --date <YYYY-MM-DD>
+  --debug            raw 응답 dump
+  -h, --help
+
+라이브 중 키:
+  q          종료
+  r          즉시 새로고침
+  ←/→        다른 진행중 경기로 전환
+`);
+}
+
+async function cmdToday(args: Args): Promise<void> {
+  const games = await fetchSchedule(args.date);
+  if (args.debug) {
+    console.log(JSON.stringify(games, null, 2));
+    return;
+  }
+  console.log(renderScheduleList(games, args.date));
+}
+
+async function cmdWatch(args: Args): Promise<void> {
+  const games = await fetchSchedule(args.date);
+
+  if (args.debug && args.game) {
+    const relay = await fetchRelay(args.game);
+    console.log(JSON.stringify(relay, null, 2));
+    return;
+  }
+
+  let live = games.filter((g) => g.statusCode === "STARTED");
+
+  // explicit gameId wins (even if not in 'live' list — e.g. recent game review)
+  if (args.game) {
+    const exact = games.find((g) => g.gameId === args.game);
+    if (!exact) {
+      console.error(pc.red(`gameId ${args.game} 를 ${args.date} 일정에서 찾지 못했습니다.`));
+      process.exit(1);
+    }
+    live = [exact];
+  } else if (args.team) {
+    const filtered = live.filter(
+      (g) => g.homeTeamName === args.team || g.awayTeamName === args.team
+    );
+    if (filtered.length === 0) {
+      console.error(pc.red(`${args.team} 의 진행중 경기를 찾지 못했습니다.`));
+      process.exit(1);
+    }
+    live = filtered;
+  }
+
+  if (live.length === 0) {
+    console.log(pc.yellow("진행중인 KBO 경기가 없습니다.\n"));
+    console.log(renderScheduleList(games, args.date));
+    process.exit(0);
+  }
+
+  await watch({
+    intervalSec: args.intervalSec,
+    initialGameIndex: 0,
+    liveGames: live,
+  });
+}
+
+async function main(): Promise<void> {
+  const args = parseArgs(process.argv.slice(2));
+  if (args.help) {
+    printHelp();
+    return;
+  }
+  try {
+    if (args.cmd === "today") await cmdToday(args);
+    else if (args.cmd === "watch") await cmdWatch(args);
+  } catch (e) {
+    console.error(pc.red(`\n에러: ${(e as Error).message}`));
+    process.exit(1);
+  }
+}
+
+await main();

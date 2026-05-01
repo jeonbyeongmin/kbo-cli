@@ -4,30 +4,43 @@
 점수 · 이닝 · 카운트 · 주자 · 최근 플레이를 ANSI 그래픽으로 표시하고
 `watch` 모드에서 한 자리에서 갱신된다.
 
-## 요구사항
-
-- Bun ≥ 1.0 (`curl -fsSL https://bun.sh/install | bash`)
-
-## 실행
+## 설치
 
 ```bash
-cd kbo-cli
-bun install
+# 일회 실행
+npx kbo today
+npx kbo watch
 
-bun run src/index.ts                       # 오늘 경기 목록
-bun run src/index.ts today --date 2026-05-01
-bun run src/index.ts watch                 # 진행중 경기 라이브
-bun run src/index.ts watch --team LG
-bun run src/index.ts watch --game 20260501NCLG02026 --interval 3
-bun run src/index.ts --help
-```
-
-전역 명령으로 쓰려면:
-
-```bash
-bun link             # /Users/.../kbo-cli 에서
+# 전역 설치
+npm i -g kbo-cli
+kbo today
 kbo watch
 ```
+
+요구사항: Node ≥ 18.
+
+## 사용
+
+```bash
+kbo                                      # 오늘 경기 목록
+kbo today --date 2026-05-01
+kbo watch                                # 진행중 경기 라이브
+kbo watch --team LG
+kbo watch --game 20260501NCLG02026 --interval 3
+kbo --help
+```
+
+## 개발
+
+```bash
+git clone https://github.com/jeonbyeongmin/kbo-cli
+cd kbo-cli
+bun install
+bun run dev                              # = bun run src/index.ts
+bun run build                            # → dist/kbo.js
+```
+
+요구사항: Bun ≥ 1.0 (`curl -fsSL https://bun.sh/install | bash`)
 
 ## 라이브 중 키
 

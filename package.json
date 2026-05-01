@@ -1,0 +1,51 @@
+{
+  "name": "kbo-cli",
+  "version": "0.1.0",
+  "description": "KBO 라이브 중계 TUI CLI — terminal-based KBO baseball live scoreboard",
+  "keywords": [
+    "kbo",
+    "baseball",
+    "야구",
+    "한국프로야구",
+    "tui",
+    "cli",
+    "terminal",
+    "live-score",
+    "scoreboard"
+  ],
+  "homepage": "https://github.com/jeonbyeongmin/kbo-cli",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jeonbyeongmin/kbo-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jeonbyeongmin/kbo-cli/issues"
+  },
+  "author": "jeonbyeongmin",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "kbo": "./dist/kbo.js"
+  },
+  "files": [
+    "dist/",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "build": "bun run scripts/build.ts",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "bun run typecheck && bun run build"
+  },
+  "dependencies": {
+    "picocolors": "^1.0.1"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
