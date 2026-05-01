@@ -81,6 +81,8 @@ function printHelp(): void {
   q          종료
   r          즉시 새로고침
   ←/→        watch: 진행중 경기 전환 · stats: 정렬/카테고리 전환
+  ↑/↓        stats 순위: 뷰 토글 · stats 리더보드: 행 스크롤
+  t          stats 리더보드: 팀 필터 cycling
 `);
 }
 

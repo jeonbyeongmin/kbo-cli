@@ -1,5 +1,5 @@
 import pc from "picocolors";
-import { currentSeasonCode, fetchLeaderboards, fetchStandings } from "./api.ts";
+import { currentSeasonCode, fetchLeaderboards, fetchPlayers, fetchStandings } from "./api.ts";
 import { colorTeam, frame, padEnd, truncName } from "./render.ts";
 import type { PlayerRanking, TeamStat, TopPlayerCategory } from "./types.ts";
 
@@ -11,8 +11,8 @@ const HOME = "\x1b[H";
 const CLEAR_AFTER = "\x1b[J";
 const CLEAR_LINE = "\x1b[K";
 
-const FRAME_WIDTH = 64; // stats 표는 watch 의 56 보다 넓은 폭이 필요
-const LEADERBOARD_LIMIT = 20;
+const FRAME_WIDTH = 64;
+const LEADERBOARD_WINDOW = 20;
 
 type StatsView = "standings" | "batting" | "pitching";
 
@@ -21,75 +21,20 @@ interface StatsArgs {
   debug: boolean;
 }
 
-interface SortKey {
-  label: string;
-  apply: (rows: TeamStat[]) => TeamStat[];
+interface Column<T> {
+  header: string;
+  width: number;
+  cell: (row: T, idx: number) => string;
 }
 
-const STANDINGS_SORTS: SortKey[] = [
-  {
-    label: "순위",
-    apply: (rs) => [...rs].sort((a, b) => a.ranking - b.ranking),
-  },
-  {
-    label: "승",
-    apply: (rs) => [...rs].sort((a, b) => (b.winGameCount ?? -1) - (a.winGameCount ?? -1)),
-  },
-  {
-    label: "패",
-    apply: (rs) =>
-      [...rs].sort(
-        (a, b) =>
-          (a.loseGameCount ?? Number.POSITIVE_INFINITY) -
-          (b.loseGameCount ?? Number.POSITIVE_INFINITY)
-      ),
-  },
-  {
-    label: "승률",
-    apply: (rs) => [...rs].sort((a, b) => (b.wra ?? -1) - (a.wra ?? -1)),
-  },
-  {
-    label: "타율",
-    apply: (rs) => [...rs].sort((a, b) => (b.offenseHra ?? -1) - (a.offenseHra ?? -1)),
-  },
-  {
-    label: "평균자책",
-    apply: (rs) =>
-      [...rs].sort(
-        (a, b) =>
-          (a.defenseEra ?? Number.POSITIVE_INFINITY) - (b.defenseEra ?? Number.POSITIVE_INFINITY)
-      ),
-  },
-];
-
-const CATEGORY_LABEL: Record<string, string> = {
-  hitterHra: "타율",
-  hitterHr: "홈런",
-  hitterRbi: "타점",
-  hitterRun: "득점",
-  hitterHit: "안타",
-  hitterH2: "2루타",
-  hitterH3: "3루타",
-  hitterSb: "도루",
-  hitterBb: "볼넷",
-  hitterKk: "삼진",
-  hitterOps: "OPS",
-  hitterObp: "출루율",
-  hitterSlg: "장타율",
-  hitterIsop: "ISOP",
-  hitterWar: "WAR",
-  pitcherEra: "평균자책",
-  pitcherWin: "다승",
-  pitcherLose: "패",
-  pitcherKk: "탈삼진",
-  pitcherSave: "세이브",
-  pitcherHold: "홀드",
-  pitcherWhip: "WHIP",
-  pitcherWar: "WAR",
-};
-
-function categoryLabel(type: string): string {
-  return CATEGORY_LABEL[type] ?? type;
+function renderTable<T>(rows: T[], cols: Column<T>[], startIdx = 0): string[] {
+  const header = ` ${cols.map((c) => pc.dim(padEnd(c.header, c.width))).join(" ")}`;
+  const lines = [header];
+  rows.forEach((r, i) => {
+    const idx = startIdx + i;
+    lines.push(` ${cols.map((c) => padEnd(c.cell(r, idx), c.width)).join(" ")}`);
+  });
+  return lines;
 }
 
 function fmtRate(n: number | null | undefined, decimals = 3): string {
@@ -133,60 +78,158 @@ function highlight(label: string, active: boolean): string {
   return active ? `${pc.cyan("▶")}${pc.bold(label)}${pc.cyan("◀")}` : pc.dim(label);
 }
 
-function joinSortKeys(labels: string[], activeIdx: number): string {
+function joinKeys(labels: string[], activeIdx: number): string {
   return labels.map((l, i) => highlight(l, i === activeIdx)).join(" ");
 }
 
-function renderStandings(rows: TeamStat[], sortIdx: number, season: string): string {
-  const sort = STANDINGS_SORTS[sortIdx]!;
-  const sorted = sort.apply(rows);
-  const body: string[] = [];
+interface SortKey<T> {
+  label: string;
+  apply: (rows: T[]) => T[];
+}
 
-  const header = ` ${[
-    pc.dim(padEnd("순", 4)),
-    pc.dim(padEnd("팀", 6)),
-    pc.dim(padEnd("경기", 6)),
-    pc.dim(padEnd("승", 4)),
-    pc.dim(padEnd("패", 4)),
-    pc.dim(padEnd("무", 4)),
-    pc.dim(padEnd("승률", 6)),
-    pc.dim(padEnd("게임차", 7)),
-    pc.dim(padEnd("연속", 5)),
-    pc.dim(padEnd("최근5", 8)),
-  ].join(" ")}`;
-  body.push(header);
+function descBy<T>(get: (r: T) => number | null | undefined): (rs: T[]) => T[] {
+  return (rs) =>
+    [...rs].sort(
+      (a, b) => (get(b) ?? Number.NEGATIVE_INFINITY) - (get(a) ?? Number.NEGATIVE_INFINITY)
+    );
+}
 
-  for (const r of sorted) {
-    const line = ` ${[
-      padEnd(String(r.ranking), 4),
-      padEnd(colorTeam(r.teamName), 6),
-      padEnd(fmtNum(r.gameCount), 6),
-      padEnd(fmtNum(r.winGameCount), 4),
-      padEnd(fmtNum(r.loseGameCount), 4),
-      padEnd(fmtNum(r.drawnGameCount), 4),
-      padEnd(fmtRate(r.wra), 6),
-      padEnd(fmtGB(r.gameBehind), 7),
-      padEnd(colorStreak(r.continuousGameResult), 5),
-      padEnd(colorLastFive(r.lastFiveGames), 8),
-    ].join(" ")}`;
-    body.push(line);
-  }
+function ascBy<T>(get: (r: T) => number | null | undefined): (rs: T[]) => T[] {
+  return (rs) =>
+    [...rs].sort(
+      (a, b) => (get(a) ?? Number.POSITIVE_INFINITY) - (get(b) ?? Number.POSITIVE_INFINITY)
+    );
+}
 
-  body.push("");
-  body.push(
-    `${pc.dim("정렬:")} ${joinSortKeys(
-      STANDINGS_SORTS.map((s) => s.label),
-      sortIdx
-    )}`
-  );
+interface StandingsViewDef {
+  label: string;
+  columns: Column<TeamStat>[];
+  sorts: SortKey<TeamStat>[];
+}
 
-  const title = `KBO 순위 · ${season}`;
-  const footer = "←/→: 정렬 변경  r: 새로고침  q: 종료";
-  return frame(title, body, footer, FRAME_WIDTH).join("\n");
+const STANDINGS_VIEWS: StandingsViewDef[] = [
+  {
+    label: "기본",
+    columns: [
+      { header: "순", width: 4, cell: (r) => String(r.ranking) },
+      { header: "팀", width: 6, cell: (r) => colorTeam(r.teamName) },
+      { header: "경기", width: 6, cell: (r) => fmtNum(r.gameCount) },
+      { header: "승", width: 4, cell: (r) => fmtNum(r.winGameCount) },
+      { header: "패", width: 4, cell: (r) => fmtNum(r.loseGameCount) },
+      { header: "무", width: 4, cell: (r) => fmtNum(r.drawnGameCount) },
+      { header: "승률", width: 6, cell: (r) => fmtRate(r.wra) },
+      { header: "게임차", width: 7, cell: (r) => fmtGB(r.gameBehind) },
+      { header: "연속", width: 5, cell: (r) => colorStreak(r.continuousGameResult) },
+      { header: "최근5", width: 8, cell: (r) => colorLastFive(r.lastFiveGames) },
+    ],
+    sorts: [
+      { label: "순위", apply: (rs) => [...rs].sort((a, b) => a.ranking - b.ranking) },
+      { label: "승", apply: descBy<TeamStat>((r) => r.winGameCount) },
+      { label: "패", apply: ascBy<TeamStat>((r) => r.loseGameCount) },
+      { label: "승률", apply: descBy<TeamStat>((r) => r.wra) },
+    ],
+  },
+  {
+    label: "공격",
+    columns: [
+      { header: "순", width: 4, cell: (r) => String(r.ranking) },
+      { header: "팀", width: 6, cell: (r) => colorTeam(r.teamName) },
+      { header: "경기", width: 5, cell: (r) => fmtNum(r.gameCount) },
+      { header: "타율", width: 7, cell: (r) => fmtRate(r.offenseHra) },
+      { header: "출루율", width: 6, cell: (r) => fmtRate(r.offenseObp) },
+      { header: "장타율", width: 6, cell: (r) => fmtRate(r.offenseSlg) },
+      { header: "OPS", width: 6, cell: (r) => fmtRate(r.offenseOps) },
+      { header: "HR", width: 4, cell: (r) => fmtNum(r.offenseHr) },
+      { header: "타점", width: 5, cell: (r) => fmtNum(r.offenseRbi) },
+      { header: "도루", width: 5, cell: (r) => fmtNum(r.offenseSb) },
+    ],
+    sorts: [
+      { label: "타율", apply: descBy<TeamStat>((r) => r.offenseHra) },
+      { label: "OPS", apply: descBy<TeamStat>((r) => r.offenseOps) },
+      { label: "출루율", apply: descBy<TeamStat>((r) => r.offenseObp) },
+      { label: "장타율", apply: descBy<TeamStat>((r) => r.offenseSlg) },
+      { label: "HR", apply: descBy<TeamStat>((r) => r.offenseHr) },
+      { label: "타점", apply: descBy<TeamStat>((r) => r.offenseRbi) },
+      { label: "도루", apply: descBy<TeamStat>((r) => r.offenseSb) },
+    ],
+  },
+  {
+    label: "수비",
+    columns: [
+      { header: "순", width: 4, cell: (r) => String(r.ranking) },
+      { header: "팀", width: 6, cell: (r) => colorTeam(r.teamName) },
+      { header: "ERA", width: 7, cell: (r) => fmtRate(r.defenseEra, 2) },
+      { header: "WHIP", width: 6, cell: (r) => fmtRate(r.defenseWhip, 2) },
+      { header: "이닝", width: 7, cell: (r) => fmtNum(r.defenseInning) },
+      { header: "K", width: 5, cell: (r) => fmtNum(r.defenseKk) },
+      { header: "QS", width: 4, cell: (r) => fmtNum(r.defenseQs) },
+      { header: "SAVE", width: 5, cell: (r) => fmtNum(r.defenseSave) },
+      { header: "HOLD", width: 5, cell: (r) => fmtNum(r.defenseHold) },
+      { header: "실책", width: 5, cell: (r) => fmtNum(r.defenseErr) },
+    ],
+    sorts: [
+      { label: "ERA", apply: ascBy<TeamStat>((r) => r.defenseEra) },
+      { label: "WHIP", apply: ascBy<TeamStat>((r) => r.defenseWhip) },
+      { label: "K", apply: descBy<TeamStat>((r) => r.defenseKk) },
+      { label: "SAVE", apply: descBy<TeamStat>((r) => r.defenseSave) },
+      { label: "HOLD", apply: descBy<TeamStat>((r) => r.defenseHold) },
+      { label: "실책", apply: ascBy<TeamStat>((r) => r.defenseErr) },
+    ],
+  },
+];
+
+const CATEGORY_LABEL: Record<string, string> = {
+  hitterHra: "타율",
+  hitterHr: "홈런",
+  hitterRbi: "타점",
+  hitterRun: "득점",
+  hitterHit: "안타",
+  hitterH2: "2루타",
+  hitterH3: "3루타",
+  hitterSb: "도루",
+  hitterBb: "볼넷",
+  hitterKk: "삼진",
+  hitterOps: "OPS",
+  hitterObp: "출루율",
+  hitterSlg: "장타율",
+  hitterIsop: "ISOP",
+  hitterWar: "WAR",
+  pitcherEra: "평균자책",
+  pitcherWin: "다승",
+  pitcherLose: "패",
+  pitcherKk: "탈삼진",
+  pitcherSave: "세이브",
+  pitcherHold: "홀드",
+  pitcherWhip: "WHIP",
+  pitcherWar: "WAR",
+};
+
+function categoryLabel(type: string): string {
+  return CATEGORY_LABEL[type] ?? type;
+}
+
+// 낮을수록 좋은 지표는 ASC, 그 외는 DESC.
+function directionFor(type: string): "ASC" | "DESC" {
+  return type === "pitcherEra" || type === "pitcherWhip" || type === "pitcherLose" ? "ASC" : "DESC";
 }
 
 function readMetric(row: PlayerRanking, type: string): number | null | undefined {
   return (row as unknown as Record<string, number | null | undefined>)[type];
+}
+
+// teamCode 모드 응답은 field 를 무시하고 리그 rank 순으로 내려와서 클라이언트에서 다시 정렬한다.
+function sortPlayerRows(rows: PlayerRanking[], type: string): PlayerRanking[] {
+  const factor = directionFor(type) === "ASC" ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    const va = readMetric(a, type);
+    const vb = readMetric(b, type);
+    const aMissing = va == null || Number.isNaN(va);
+    const bMissing = vb == null || Number.isNaN(vb);
+    if (aMissing && bMissing) return 0;
+    if (aMissing) return 1;
+    if (bMissing) return -1;
+    return (va - vb) * factor;
+  });
 }
 
 function hitterMetric(row: PlayerRanking, type: string): string {
@@ -218,103 +261,157 @@ function pitcherMetric(row: PlayerRanking, type: string): string {
   }
 }
 
-function renderHitterLeaderboard(
-  cat: TopPlayerCategory,
-  catIdx: number,
-  cats: TopPlayerCategory[],
-  season: string
-): string {
-  const body: string[] = [];
-  const headlineLabel = categoryLabel(cat.type);
+// 팀 모드에선 응답이 리그 rank 순이 아니라 (이미 client 에서 재정렬됨) 순서가
+// 카테고리별로 매번 달라지므로 표시 rank 도 1..N 시퀀스로 다시 매긴다.
+function rankCell(useSequentialRank: boolean) {
+  return (r: PlayerRanking, i: number) =>
+    useSequentialRank ? String(i + 1) : String(r.ranking ?? "-");
+}
 
-  const header = ` ${[
-    pc.dim(padEnd("순", 4)),
-    pc.dim(padEnd("선수", 12)),
-    pc.dim(padEnd("팀", 6)),
-    pc.dim(padEnd(headlineLabel, 8)),
-    pc.dim(padEnd("타수", 5)),
-    pc.dim(padEnd("안타", 5)),
-    pc.dim(padEnd("HR", 4)),
-    pc.dim(padEnd("타점", 5)),
-    pc.dim(padEnd("OPS", 6)),
-  ].join(" ")}`;
-  body.push(header);
+function hitterColumns(
+  activeType: string,
+  activeLabel: string,
+  useSequentialRank: boolean
+): Column<PlayerRanking>[] {
+  return [
+    { header: "순", width: 4, cell: rankCell(useSequentialRank) },
+    { header: "선수", width: 12, cell: (r) => truncName(r.playerName) },
+    { header: "팀", width: 6, cell: (r) => colorTeam(r.teamShortName ?? r.teamName) },
+    { header: activeLabel, width: 8, cell: (r) => pc.bold(hitterMetric(r, activeType)) },
+    { header: "타수", width: 5, cell: (r) => fmtNum(r.hitterAb) },
+    { header: "안타", width: 5, cell: (r) => fmtNum(r.hitterHit) },
+    { header: "HR", width: 4, cell: (r) => fmtNum(r.hitterHr) },
+    { header: "타점", width: 5, cell: (r) => fmtNum(r.hitterRbi) },
+    { header: "OPS", width: 6, cell: (r) => fmtRate(r.hitterOps) },
+  ];
+}
 
-  for (const row of cat.rankings.slice(0, LEADERBOARD_LIMIT)) {
-    const line = ` ${[
-      padEnd(String(row.ranking), 4),
-      padEnd(truncName(row.playerName), 12),
-      padEnd(colorTeam(row.teamShortName ?? row.teamName), 6),
-      padEnd(pc.bold(hitterMetric(row, cat.type)), 8),
-      padEnd(fmtNum(row.hitterAb), 5),
-      padEnd(fmtNum(row.hitterHit), 5),
-      padEnd(fmtNum(row.hitterHr), 4),
-      padEnd(fmtNum(row.hitterRbi), 5),
-      padEnd(fmtRate(row.hitterOps), 6),
-    ].join(" ")}`;
-    body.push(line);
-  }
+function pitcherColumns(
+  activeType: string,
+  activeLabel: string,
+  useSequentialRank: boolean
+): Column<PlayerRanking>[] {
+  return [
+    { header: "순", width: 4, cell: rankCell(useSequentialRank) },
+    { header: "선수", width: 12, cell: (r) => truncName(r.playerName) },
+    { header: "팀", width: 6, cell: (r) => colorTeam(r.teamShortName ?? r.teamName) },
+    { header: activeLabel, width: 8, cell: (r) => pc.bold(pitcherMetric(r, activeType)) },
+    {
+      header: "승-패",
+      width: 7,
+      cell: (r) => `${fmtNum(r.pitcherWin)}-${fmtNum(r.pitcherLose)}`,
+    },
+    {
+      header: "이닝",
+      width: 8,
+      cell: (r) => (r.pitcherInning == null ? "-" : String(r.pitcherInning)),
+    },
+    { header: "K", width: 4, cell: (r) => fmtNum(r.pitcherKk) },
+    { header: "WHIP", width: 6, cell: (r) => fmtRate(r.pitcherWhip, 2) },
+  ];
+}
 
+function renderStandings(state: StandingsState): string {
+  const view = STANDINGS_VIEWS[state.viewIdx]!;
+  const sort = view.sorts[state.sortIdx]!;
+  const sorted = sort.apply(state.rows);
+
+  const body = renderTable(sorted, view.columns);
   body.push("");
   body.push(
-    `${pc.dim("카테고리:")} ${joinSortKeys(
-      cats.map((c) => categoryLabel(c.type)),
-      catIdx
+    `${pc.dim("뷰  :")} ${joinKeys(
+      STANDINGS_VIEWS.map((v) => v.label),
+      state.viewIdx
+    )}`
+  );
+  body.push(
+    `${pc.dim("정렬:")} ${joinKeys(
+      view.sorts.map((s) => s.label),
+      state.sortIdx
     )}`
   );
 
-  const title = `타자 · ${headlineLabel} · ${season}`;
-  const footer = "←/→: 카테고리 전환  r: 새로고침  q: 종료";
+  const title = `KBO 순위 · ${view.label} · ${state.season}`;
+  const footer = "←/→: 정렬  ↑/↓: 뷰  r: 새로고침  q: 종료";
   return frame(title, body, footer, FRAME_WIDTH).join("\n");
 }
 
-function renderPitcherLeaderboard(
-  cat: TopPlayerCategory,
-  catIdx: number,
-  cats: TopPlayerCategory[],
-  season: string
-): string {
-  const body: string[] = [];
-  const headlineLabel = categoryLabel(cat.type);
+interface TeamRef {
+  code: string;
+  name: string;
+}
 
-  const header = ` ${[
-    pc.dim(padEnd("순", 4)),
-    pc.dim(padEnd("선수", 12)),
-    pc.dim(padEnd("팀", 6)),
-    pc.dim(padEnd(headlineLabel, 8)),
-    pc.dim(padEnd("승-패", 7)),
-    pc.dim(padEnd("이닝", 8)),
-    pc.dim(padEnd("K", 4)),
-    pc.dim(padEnd("WHIP", 6)),
-  ].join(" ")}`;
-  body.push(header);
+function renderLeaderboard(state: LeaderboardState): string {
+  const cat = state.cats[state.catIdx]!;
+  const activeLabel = categoryLabel(cat.type);
+  const rows = currentLeaderboardRows(state);
+  const window = rows.slice(state.offset, state.offset + LEADERBOARD_WINDOW);
+  const useSequentialRank = state.teamCode != null;
 
-  for (const row of cat.rankings.slice(0, LEADERBOARD_LIMIT)) {
-    const wl = `${fmtNum(row.pitcherWin)}-${fmtNum(row.pitcherLose)}`;
-    const line = ` ${[
-      padEnd(String(row.ranking), 4),
-      padEnd(truncName(row.playerName), 12),
-      padEnd(colorTeam(row.teamShortName ?? row.teamName), 6),
-      padEnd(pc.bold(pitcherMetric(row, cat.type)), 8),
-      padEnd(wl, 7),
-      padEnd(row.pitcherInning == null ? "-" : String(row.pitcherInning), 8),
-      padEnd(fmtNum(row.pitcherKk), 4),
-      padEnd(fmtRate(row.pitcherWhip, 2), 6),
-    ].join(" ")}`;
-    body.push(line);
-  }
+  const cols =
+    state.playerType === "HITTER"
+      ? hitterColumns(cat.type, activeLabel, useSequentialRank)
+      : pitcherColumns(cat.type, activeLabel, useSequentialRank);
+  const body = renderTable(window, cols, state.offset);
 
   body.push("");
   body.push(
-    `${pc.dim("카테고리:")} ${joinSortKeys(
-      cats.map((c) => categoryLabel(c.type)),
-      catIdx
+    `${pc.dim("카테고리:")} ${joinKeys(
+      state.cats.map((c) => categoryLabel(c.type)),
+      state.catIdx
     )}`
   );
 
-  const title = `투수 · ${headlineLabel} · ${season}`;
-  const footer = "←/→: 카테고리 전환  r: 새로고침  q: 종료";
+  const teamLabels = ["전체", ...state.teams.map((t) => t.name)];
+  const teamIdx = state.teamCode ? 1 + state.teams.findIndex((t) => t.code === state.teamCode) : 0;
+  body.push(`${pc.dim("팀  :")} ${joinKeys(teamLabels, Math.max(0, teamIdx))}`);
+
+  const total = rows.length;
+  const from = total === 0 ? 0 : state.offset + 1;
+  const to = Math.min(state.offset + LEADERBOARD_WINDOW, total);
+  const rangeText = total === 0 ? "0 / 0" : `${from}-${to} / ${total}`;
+  const teamSuffix = state.teamCode
+    ? ` · ${state.teams.find((t) => t.code === state.teamCode)?.name ?? state.teamCode}`
+    : "";
+  const title = `${state.playerType === "HITTER" ? "타자" : "투수"} · ${activeLabel}${teamSuffix} · ${state.season}`;
+  const footer = `${rangeText}  ←/→: 카테고리  ↑/↓: 스크롤  t: 팀  r/q`;
   return frame(title, body, footer, FRAME_WIDTH).join("\n");
+}
+
+function currentLeaderboardRows(state: LeaderboardState): PlayerRanking[] {
+  if (!state.teamCode) return state.cats[state.catIdx]?.rankings ?? [];
+  const type = state.cats[state.catIdx]?.type;
+  return type ? sortPlayerRows(state.teamRows, type) : state.teamRows;
+}
+
+interface StandingsState {
+  kind: "standings";
+  season: string;
+  rows: TeamStat[];
+  sortIdx: number;
+  viewIdx: number;
+}
+
+interface LeaderboardState {
+  kind: "leaderboard";
+  season: string;
+  playerType: "HITTER" | "PITCHER";
+  cats: TopPlayerCategory[];
+  catIdx: number;
+  offset: number;
+  teams: TeamRef[];
+  teamCode: string | null;
+  teamRows: PlayerRanking[];
+}
+
+type TuiState = StandingsState | LeaderboardState;
+
+function renderState(state: TuiState): string {
+  return state.kind === "standings" ? renderStandings(state) : renderLeaderboard(state);
+}
+
+function teamsFromStandings(rows: TeamStat[]): TeamRef[] {
+  return rows.map((r) => ({ code: r.teamId, name: r.teamShortName ?? r.teamName }));
 }
 
 export async function cmdStats(args: StatsArgs): Promise<void> {
@@ -335,12 +432,16 @@ export async function cmdStats(args: StatsArgs): Promise<void> {
       season,
       rows,
       sortIdx: 0,
+      viewIdx: 0,
     });
     return;
   }
 
   const playerType = args.view === "batting" ? "HITTER" : "PITCHER";
-  const cats = await fetchLeaderboards(season, playerType);
+  const [standings, cats] = await Promise.all([
+    fetchStandings(season),
+    fetchLeaderboards(season, playerType),
+  ]);
   if (args.debug) {
     console.log(JSON.stringify(cats, null, 2));
     return;
@@ -355,27 +456,11 @@ export async function cmdStats(args: StatsArgs): Promise<void> {
     playerType,
     cats,
     catIdx: 0,
+    offset: 0,
+    teams: teamsFromStandings(standings),
+    teamCode: null,
+    teamRows: [],
   });
-}
-
-type TuiState =
-  | { kind: "standings"; season: string; rows: TeamStat[]; sortIdx: number }
-  | {
-      kind: "leaderboard";
-      season: string;
-      playerType: "HITTER" | "PITCHER";
-      cats: TopPlayerCategory[];
-      catIdx: number;
-    };
-
-function renderState(state: TuiState): string {
-  if (state.kind === "standings") {
-    return renderStandings(state.rows, state.sortIdx, state.season);
-  }
-  const cat = state.cats[state.catIdx]!;
-  return state.playerType === "HITTER"
-    ? renderHitterLeaderboard(cat, state.catIdx, state.cats, state.season)
-    : renderPitcherLeaderboard(cat, state.catIdx, state.cats, state.season);
 }
 
 async function runTui(initial: TuiState): Promise<void> {
@@ -423,15 +508,85 @@ async function runTui(initial: TuiState): Promise<void> {
     process.stdout.write(CLEAR_AFTER);
   };
 
-  const cycle = (delta: number) => {
+  const clampOffset = (s: LeaderboardState): LeaderboardState => {
+    const total = currentLeaderboardRows(s).length;
+    const max = Math.max(0, total - LEADERBOARD_WINDOW);
+    return { ...s, offset: Math.max(0, Math.min(s.offset, max)) };
+  };
+
+  // 팀 모드는 응답이 카테고리에 무관하게 동일하므로 한 번만 받아 캐시하고
+  // 카테고리 전환은 client-side 정렬로 처리한다 — 중복 fetch 와 race 회피.
+  const fetchTeamRows = async (s: LeaderboardState): Promise<PlayerRanking[]> => {
+    if (!s.teamCode) return [];
+    const type = s.cats[s.catIdx]?.type ?? "hitterHra";
+    return fetchPlayers(s.season, {
+      playerType: s.playerType,
+      field: type,
+      direction: directionFor(type),
+      teamCode: s.teamCode,
+    });
+  };
+
+  const cycleHorizontal = (delta: number) => {
     if (state.kind === "standings") {
-      const len = STANDINGS_SORTS.length;
+      const len = STANDINGS_VIEWS[state.viewIdx]!.sorts.length;
       state = { ...state, sortIdx: (state.sortIdx + delta + len) % len };
-    } else {
-      const len = state.cats.length;
-      state = { ...state, catIdx: (state.catIdx + delta + len) % len };
+      draw();
+      return;
     }
+    const len = state.cats.length;
+    state = clampOffset({
+      ...state,
+      catIdx: (state.catIdx + delta + len) % len,
+      offset: 0,
+    });
     draw();
+  };
+
+  const cycleVertical = async (delta: number) => {
+    if (state.kind === "standings") {
+      const len = STANDINGS_VIEWS.length;
+      state = {
+        ...state,
+        viewIdx: (state.viewIdx + delta + len) % len,
+        sortIdx: 0,
+      };
+      draw();
+      return;
+    }
+    state = clampOffset({ ...state, offset: state.offset + delta });
+    draw();
+  };
+
+  const cycleTeam = async () => {
+    if (state.kind !== "leaderboard") return;
+    const lb = state;
+    const cycle: (string | null)[] = [null, ...lb.teams.map((t) => t.code)];
+    const cur = cycle.findIndex((c) => c === lb.teamCode);
+    const nextCode = cycle[(cur + 1) % cycle.length] ?? null;
+    const next: LeaderboardState = {
+      ...lb,
+      teamCode: nextCode,
+      offset: 0,
+      teamRows: [],
+    };
+    state = next;
+    draw();
+    if (nextCode) {
+      busy = true;
+      try {
+        const rows = await fetchTeamRows(next);
+        if (state.kind === "leaderboard" && state.teamCode === nextCode) {
+          state = clampOffset({ ...state, teamRows: rows });
+          lastError = null;
+        }
+      } catch (e) {
+        lastError = `팀 데이터 로드 실패: ${(e as Error).message}`;
+      } finally {
+        busy = false;
+        draw();
+      }
+    }
   };
 
   const refresh = async () => {
@@ -441,11 +596,14 @@ async function runTui(initial: TuiState): Promise<void> {
       if (state.kind === "standings") {
         const rows = await fetchStandings(state.season);
         if (rows.length > 0) state = { ...state, rows };
+      } else if (state.teamCode) {
+        const rows = await fetchTeamRows(state);
+        state = clampOffset({ ...state, teamRows: rows });
       } else {
         const cats = await fetchLeaderboards(state.season, state.playerType);
         if (cats.length > 0) {
           const catIdx = Math.min(state.catIdx, cats.length - 1);
-          state = { ...state, cats, catIdx };
+          state = clampOffset({ ...state, cats, catIdx });
         }
       }
       lastError = null;
@@ -470,12 +628,24 @@ async function runTui(initial: TuiState): Promise<void> {
         void refresh();
         return;
       }
+      if (data === "t" || data === "T") {
+        void cycleTeam();
+        return;
+      }
       if (data === "\x1b[C") {
-        cycle(1);
+        void cycleHorizontal(1);
         return;
       }
       if (data === "\x1b[D") {
-        cycle(-1);
+        void cycleHorizontal(-1);
+        return;
+      }
+      if (data === "\x1b[A") {
+        void cycleVertical(-1);
+        return;
+      }
+      if (data === "\x1b[B") {
+        void cycleVertical(1);
         return;
       }
     });

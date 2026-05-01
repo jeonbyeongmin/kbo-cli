@@ -53,12 +53,14 @@ bun run build                            # → dist/kbo.js
 
 ## 라이브/통계 화면 키
 
-| 키       | 동작                                                    |
-| -------- | ------------------------------------------------------- |
-| `q`      | 종료                                                    |
-| `r`      | 즉시 새로고침                                           |
-| `←` `→`  | watch: 진행중 경기 전환 · stats: 정렬/카테고리 전환     |
-| `Ctrl+C` | 종료                                                    |
+| 키       | 동작                                                                |
+| -------- | ------------------------------------------------------------------- |
+| `q`      | 종료                                                                |
+| `r`      | 즉시 새로고침                                                       |
+| `←` `→`  | watch: 진행중 경기 전환 · stats: 정렬/카테고리 전환                 |
+| `↑` `↓`  | stats 순위: 뷰(기본/공격/수비) · stats 리더보드: 행 스크롤          |
+| `t`      | stats 리더보드: 팀 필터 cycling (전체 ↔ 각 팀)                      |
+| `Ctrl+C` | 종료                                                                |
 
 ## 데이터 소스
 
@@ -66,9 +68,9 @@ Naver Sports 비공식 게이트웨이 (`api-gw.sports.naver.com`):
 
 - 일정: `/schedule/games?upperCategoryId=kbaseball&date=YYYY-MM-DD`
 - 라이브: `/schedule/games/{gameId}/relay`
-- 시즌: `/statistics/categories/kbo/seasons`
 - 순위: `/statistics/categories/kbo/seasons/{seasonCode}/teams`
 - 리더보드: `/statistics/categories/kbo/seasons/{seasonCode}/top-players?playerType=HITTER|PITCHER`
+- 팀 로스터: `/statistics/categories/kbo/seasons/{seasonCode}/players?playerType=...&field=...&direction=...&teamCode=...`
 
 비공식이라 무공지 변경 위험이 있다. 응답 구조가 깨지면 `--debug` 와
 `watch --debug --game <id>` 로 raw JSON 을 덤프해 비교한다.
