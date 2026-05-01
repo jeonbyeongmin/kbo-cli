@@ -1,10 +1,17 @@
 import pc from "picocolors";
 import { fetchRelay, fetchSchedule, todayDate } from "./api.ts";
 import { renderScheduleList } from "./render.ts";
+import {
+  CURRENT_VERSION,
+  getUpdateBanner,
+  maybeTriggerBackgroundCheck,
+  runBackgroundCheck,
+  runUpdate,
+} from "./update.ts";
 import { watch } from "./watch.ts";
 
 interface Args {
-  cmd: "today" | "watch";
+  cmd: "today" | "watch" | "update";
   date: string;
   team?: string;
   game?: string;
@@ -33,6 +40,7 @@ function parseArgs(argv: string[]): Args {
     else if (!a.startsWith("--")) positional.push(a);
   }
   if (positional[0] === "watch") args.cmd = "watch";
+  else if (positional[0] === "update") args.cmd = "update";
   else if (positional[0] === "today" || positional[0] === undefined) args.cmd = "today";
   return args;
 }
@@ -46,12 +54,17 @@ function printHelp(): void {
   kbo watch                    진행중 경기 라이브 중계 (자동 선택)
   kbo watch --team LG          팀 자동 선택
   kbo watch --game <gameId>    특정 게임 ID
+  kbo update                   최신 버전으로 업데이트
+  kbo --version                현재 버전 출력
 
 옵션:
   --interval <sec>   폴링 주기 (기본 5)
   --date <YYYY-MM-DD>
   --debug            raw 응답 dump
   -h, --help
+
+환경 변수:
+  KBO_NO_UPDATE_CHECK=1   백그라운드 업데이트 체크 비활성화
 
 라이브 중 키:
   q          종료
@@ -113,14 +126,33 @@ async function cmdWatch(args: Args): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+
+  if (argv[0] === "__update-check") {
+    await runBackgroundCheck();
+    return;
+  }
+  if (argv[0] === "--version" || argv[0] === "-v") {
+    console.log(`v${CURRENT_VERSION}`);
+    return;
+  }
+
+  const args = parseArgs(argv);
   if (args.help) {
     printHelp();
     return;
   }
+
+  if (args.cmd !== "update") {
+    const banner = getUpdateBanner();
+    if (banner) console.log(banner + "\n");
+    maybeTriggerBackgroundCheck();
+  }
+
   try {
     if (args.cmd === "today") await cmdToday(args);
     else if (args.cmd === "watch") await cmdWatch(args);
+    else if (args.cmd === "update") await runUpdate();
   } catch (e) {
     console.error(pc.red(`\n에러: ${(e as Error).message}`));
     process.exit(1);
