@@ -1,22 +1,46 @@
 import pc from "picocolors";
 import type { BatterStats, NormalizedGame, PitcherStats, ScheduleGame } from "./types.ts";
 
-const TEAM_COLOR: Record<string, (s: string) => string> = {
-  LG: pc.red,
-  두산: pc.blue,
-  KIA: pc.red,
-  KT: pc.white,
-  삼성: pc.blue,
-  한화: pc.yellow,
-  SSG: pc.red,
-  롯데: pc.blue,
-  NC: pc.cyan,
-  키움: pc.magenta,
+const TEAM_HEX: Record<string, string> = {
+  LG: "#C30452",
+  두산: "#1A1748",
+  KIA: "#EA0029",
+  KT: "#000000",
+  삼성: "#074CA1",
+  한화: "#FC4E00",
+  SSG: "#CE0E2D",
+  롯데: "#041E42",
+  NC: "#315288",
+  키움: "#570514",
+};
+
+// fg 는 BT.601 perceived brightness 로 흑/백 자동 선택해 어떤 팀 hex 에서도 가독성 확보.
+function chip(hex: string): (s: string) => string {
+  const r = Number.parseInt(hex.slice(1, 3), 16);
+  const g = Number.parseInt(hex.slice(3, 5), 16);
+  const b = Number.parseInt(hex.slice(5, 7), 16);
+  const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+  const fg = brightness > 128 ? "0;0;0" : "255;255;255";
+  const open = `\x1b[48;2;${r};${g};${b}m\x1b[38;2;${fg}m`;
+  const close = "\x1b[49m\x1b[39m";
+  return (str) => (pc.isColorSupported ? `${open}${str}${close}` : str);
+}
+
+const TEAM_COLOR: Record<string, (s: string) => string> = Object.fromEntries(
+  Object.entries(TEAM_HEX).map(([k, v]) => [k, chip(v)])
+);
+
+// 영문 2글자 팀명은 자간 1 을 넣어 한국어 2자 (visual 4) 와 시각적 폭을 가깝게 맞춘다.
+const TEAM_DISPLAY: Record<string, string> = {
+  KT: "K T",
+  LG: "L G",
+  NC: "N C",
 };
 
 export function colorTeam(name: string): string {
+  const display = TEAM_DISPLAY[name] ?? name;
   const fn = TEAM_COLOR[name];
-  return fn ? fn(pc.bold(name)) : pc.bold(name);
+  return fn ? fn(pc.bold(display)) : pc.bold(display);
 }
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences require \x1b
@@ -53,6 +77,12 @@ export function padEnd(s: string, width: number): string {
   const w = visualWidth(s);
   if (w >= width) return s;
   return s + " ".repeat(width - w);
+}
+
+export function padStart(s: string, width: number): string {
+  const w = visualWidth(s);
+  if (w >= width) return s;
+  return " ".repeat(width - w) + s;
 }
 
 const W = 56; // inner width of box
@@ -172,10 +202,10 @@ export function renderGame(game: NormalizedGame, opts: { staleSec?: number } = {
 
   body.push("");
   // Score block
-  const awayLine = `  ${colorTeam(game.awayTeamName.padEnd(8))}  ${pc.bold(
+  const awayLine = `  ${padEnd(colorTeam(game.awayTeamName), 8)}  ${pc.bold(
     String(game.awayScore).padStart(2)
   )}`;
-  const homeLine = `  ${colorTeam(game.homeTeamName.padEnd(8))}  ${pc.bold(
+  const homeLine = `  ${padEnd(colorTeam(game.homeTeamName), 8)}  ${pc.bold(
     String(game.homeScore).padStart(2)
   )}`;
   body.push(awayLine + (game.topBottom === "top" ? pc.cyan("  ◀ 공격") : ""));
@@ -212,11 +242,11 @@ export function renderGame(game: NormalizedGame, opts: { staleSec?: number } = {
     const headerCells = Array.from({ length: innings }, (_, i) => String(i + 1).padStart(2)).join(
       " "
     );
-    body.push(`  ${pc.dim("회".padEnd(6))} ${pc.dim(headerCells)}`);
+    body.push(`  ${pc.dim(padEnd("회", 6))} ${pc.dim(headerCells)}`);
     const awayCells = game.inningLine.away.map((v) => v.padStart(2)).join(" ");
     const homeCells = game.inningLine.home.map((v) => v.padStart(2)).join(" ");
-    body.push(`  ${game.awayTeamName.padEnd(6)} ${awayCells}`);
-    body.push(`  ${game.homeTeamName.padEnd(6)} ${homeCells}`);
+    body.push(`  ${padEnd(game.awayTeamName, 6)} ${awayCells}`);
+    body.push(`  ${padEnd(game.homeTeamName, 6)} ${homeCells}`);
     body.push("");
   }
 
@@ -253,13 +283,11 @@ export function renderScheduleList(games: ScheduleGame[], date: string): string 
             : pc.yellow(g.statusInfo || g.statusCode);
     const score =
       g.statusCode === "READY"
-        ? pc.dim("    ")
-        : `${String(g.awayTeamScore).padStart(2)}:${String(g.homeTeamScore).padEnd(2)}`;
-    lines.push(
-      `  ${status}  ${time}  ${colorTeam(g.awayTeamName.padStart(4))} ${score} ${colorTeam(
-        g.homeTeamName.padEnd(4)
-      )}  ${pc.dim(g.gameId)}`
-    );
+        ? pc.dim("      ")
+        : `${String(g.awayTeamScore).padStart(2)} ${pc.dim("-")} ${String(g.homeTeamScore).padEnd(2)}`;
+    const away = padStart(colorTeam(g.awayTeamName), 4);
+    const home = padEnd(colorTeam(g.homeTeamName), 4);
+    lines.push(`  ${status}  ${time}  ${away}  ${score}  ${home}  ${pc.dim(g.gameId)}`);
   }
   lines.push("");
   lines.push(pc.dim("  watch:  kbo watch --game <gameId>"));
