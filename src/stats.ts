@@ -379,8 +379,9 @@ function renderLeaderboard(state: LeaderboardState): string {
 }
 
 function currentLeaderboardRows(state: LeaderboardState): PlayerRanking[] {
-  if (state.teamCode) return state.teamRows;
-  return state.cats[state.catIdx]?.rankings ?? [];
+  if (!state.teamCode) return state.cats[state.catIdx]?.rankings ?? [];
+  const type = state.cats[state.catIdx]?.type;
+  return type ? sortPlayerRows(state.teamRows, type) : state.teamRows;
 }
 
 interface StandingsState {
@@ -513,20 +514,20 @@ async function runTui(initial: TuiState): Promise<void> {
     return { ...s, offset: Math.max(0, Math.min(s.offset, max)) };
   };
 
+  // 팀 모드는 응답이 카테고리에 무관하게 동일하므로 한 번만 받아 캐시하고
+  // 카테고리 전환은 client-side 정렬로 처리한다 — 중복 fetch 와 race 회피.
   const fetchTeamRows = async (s: LeaderboardState): Promise<PlayerRanking[]> => {
     if (!s.teamCode) return [];
-    const type = s.cats[s.catIdx]?.type;
-    if (!type) return [];
-    const rows = await fetchPlayers(s.season, {
+    const type = s.cats[s.catIdx]?.type ?? "hitterHra";
+    return fetchPlayers(s.season, {
       playerType: s.playerType,
       field: type,
       direction: directionFor(type),
       teamCode: s.teamCode,
     });
-    return sortPlayerRows(rows, type);
   };
 
-  const cycleHorizontal = async (delta: number) => {
+  const cycleHorizontal = (delta: number) => {
     if (state.kind === "standings") {
       const len = STANDINGS_VIEWS[state.viewIdx]!.sorts.length;
       state = { ...state, sortIdx: (state.sortIdx + delta + len) % len };
@@ -534,28 +535,12 @@ async function runTui(initial: TuiState): Promise<void> {
       return;
     }
     const len = state.cats.length;
-    const next: LeaderboardState = {
+    state = clampOffset({
       ...state,
       catIdx: (state.catIdx + delta + len) % len,
       offset: 0,
-    };
-    state = next;
+    });
     draw();
-    if (next.teamCode) {
-      busy = true;
-      try {
-        const rows = await fetchTeamRows(next);
-        if (state === next || (state.kind === "leaderboard" && state.teamCode === next.teamCode)) {
-          state = clampOffset({ ...(state as LeaderboardState), teamRows: rows });
-          lastError = null;
-        }
-      } catch (e) {
-        lastError = `팀 데이터 로드 실패: ${(e as Error).message}`;
-      } finally {
-        busy = false;
-        draw();
-      }
-    }
   };
 
   const cycleVertical = async (delta: number) => {
