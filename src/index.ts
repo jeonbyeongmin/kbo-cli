@@ -1,7 +1,8 @@
 import pc from "picocolors";
-import { fetchRelay, fetchSchedule, todayDate } from "./api.ts";
+import { fetchGameBasic, fetchRelay, fetchSchedule, isPlayable, todayDate } from "./api.ts";
 import { renderScheduleList } from "./render.ts";
 import { cmdStats } from "./stats.ts";
+import type { GameStatus } from "./types.ts";
 import {
   CURRENT_VERSION,
   getUpdateBanner,
@@ -95,6 +96,16 @@ async function cmdToday(args: Args): Promise<void> {
   console.log(renderScheduleList(games, args.date));
 }
 
+// watch 박스 회전 순서 — 라이브 > 시작 전 > 중단 > 종료. CANCEL 은 isPlayable 에서 빠져 도달하지 않음.
+const STATUS_RANK: Record<GameStatus, number> = {
+  STARTED: 0,
+  BEFORE: 1,
+  READY: 1,
+  SUSPENDED: 2,
+  RESULT: 3,
+  CANCEL: 99,
+};
+
 async function cmdWatch(args: Args): Promise<void> {
   const games = await fetchSchedule(args.date);
 
@@ -104,7 +115,14 @@ async function cmdWatch(args: Args): Promise<void> {
     return;
   }
 
-  let live = games.filter((g) => g.statusCode === "STARTED");
+  // 라이브가 가장 먼저, 그 다음 곧 시작 → 중단 → 종료 순. 같은 그룹 안에서는 시간순.
+  let live = games.filter((g) => isPlayable(g.statusCode));
+  live.sort((a, b) => {
+    const ra = STATUS_RANK[a.statusCode] ?? 99;
+    const rb = STATUS_RANK[b.statusCode] ?? 99;
+    if (ra !== rb) return ra - rb;
+    return a.gameDateTime.localeCompare(b.gameDateTime);
+  });
 
   // explicit gameId wins (even if not in 'live' list — e.g. recent game review)
   if (args.game) {
@@ -119,22 +137,25 @@ async function cmdWatch(args: Args): Promise<void> {
       (g) => g.homeTeamName === args.team || g.awayTeamName === args.team
     );
     if (filtered.length === 0) {
-      console.error(pc.red(`${args.team} 의 진행중 경기를 찾지 못했습니다.`));
+      console.error(pc.red(`${args.team} 의 경기를 찾지 못했습니다.`));
       process.exit(1);
     }
     live = filtered;
   }
 
   if (live.length === 0) {
-    console.log(pc.yellow("진행중인 KBO 경기가 없습니다.\n"));
+    console.log(pc.yellow("관전 가능한 KBO 경기가 없습니다.\n"));
     console.log(renderScheduleList(games, args.date));
     process.exit(0);
   }
 
+  // /schedule/games 응답은 stadium/starter/weather 등이 비어있어 단일 게임 endpoint 로 보강.
+  const enriched = await Promise.all(live.map((g) => fetchGameBasic(g.gameId).catch(() => g)));
+
   await watch({
     intervalSec: args.intervalSec,
     initialGameIndex: 0,
-    liveGames: live,
+    liveGames: enriched,
   });
 }
 

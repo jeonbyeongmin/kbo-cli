@@ -117,6 +117,7 @@ gh pr view --json number,url,state 2>/dev/null
 - [x] `bun run build`
 - [x] `bun test`
 - [ ] CLI 동작 확인 (`bun run dev today`, `bun run dev watch --game <id>`)
+- [ ] fixture 화면 검증 (`bun run render:fixture` — 라이브 없을 때 STARTED/RESULT/BEFORE 한 프레임씩)
 
 ## 관련
 - (이슈 / 문서 / 외부 컨텍스트 링크가 있으면, 없으면 섹션 통째로 생략)
@@ -124,7 +125,8 @@ gh pr view --json number,url,state 2>/dev/null
 
 세부 규칙:
 
-- UI/렌더(`src/render.ts`, `src/watch.ts`) 또는 CLI 동작(`src/index.ts`)이 바뀌지 않았다면 마지막 체크박스(CLI 동작 확인)는 제외.
+- UI/렌더(`src/render.ts`, `src/watch.ts`) 또는 CLI 동작(`src/index.ts`)이 바뀌지 않았다면 "CLI 동작 확인" 과 "fixture 화면 검증" 두 체크박스를 제외.
+- UI/렌더가 바뀐 PR 이고 라이브 경기가 없는 시간대라면, "CLI 동작 확인" 체크박스는 제외하고 "fixture 화면 검증" 만 남긴다 — 라이브 없이도 모드별 렌더를 그려볼 수 있도록 `scripts/snapshot.ts` / `scripts/render-fixture.ts` 가 준비돼 있다 (CLAUDE.md 자주 쓰는 명령 참조).
 - `src/api.ts`, `src/types.ts` 가 수정된 PR 이라면 "테스트" 섹션 끝에 `--debug 로 raw 응답 확인` 항목을 추가한다 — Naver 비공식 API 응답 구조 변경 위험이 있어서 (CLAUDE.md 데이터 소스 항목).
 - 본문은 한국어. 머릿글 `## 요약`, `## 테스트` 는 그대로 유지 — 리뷰어가 빠르게 스캔할 수 있게 형식이 일관되어야 한다.
 

@@ -1,4 +1,5 @@
-export type GameStatus = "READY" | "STARTED" | "RESULT" | "CANCEL" | "SUSPENDED";
+// API 가 실제로 보내는 값은 "BEFORE". "READY" 는 과거 호환을 위해 유지하지만 같은 의미로 취급.
+export type GameStatus = "READY" | "BEFORE" | "STARTED" | "RESULT" | "CANCEL" | "SUSPENDED";
 
 export interface ScheduleGame {
   gameId: string;
@@ -14,6 +15,20 @@ export interface ScheduleGame {
   gameDateTime: string;
   cancel: boolean;
   suspended: boolean;
+  // 단일 게임 endpoint 가 추가로 채워주는 메타. 일정 목록에선 비어있을 수 있다.
+  stadium?: string | null;
+  weatherInfo?: { weather?: string; dongCode?: string } | null;
+  broadChannel?: string | null;
+  winner?: "HOME" | "AWAY" | "DRAW" | null;
+  currentInning?: string | null;
+  homeStarterName?: string | null;
+  awayStarterName?: string | null;
+  homeCurrentPitcherName?: string | null;
+  awayCurrentPitcherName?: string | null;
+  winPitcherName?: string | null;
+  losePitcherName?: string | null;
+  homeTeamRheb?: number[] | null;
+  awayTeamRheb?: number[] | null;
 }
 
 export interface LineupPlayer {
@@ -215,6 +230,13 @@ export interface TopPlayerCategory {
   rankings: PlayerRanking[];
 }
 
+export interface RHEB {
+  r: number;
+  h: number;
+  e: number;
+  b: number;
+}
+
 export interface NormalizedGame {
   gameId: string;
   homeTeamName: string;
@@ -235,4 +257,16 @@ export interface NormalizedGame {
   inningLine: { home: string[]; away: string[] };
   status: GameStatus;
   fetchedAt: number;
+  // 추가 메타 (schedule 에서 매핑). 없을 수 있음.
+  gameDateTime: string;
+  stadium: string | null;
+  weather: string | null;
+  broadChannel: string | null;
+  winner: "HOME" | "AWAY" | "DRAW" | null;
+  homeStarter: string | null;
+  awayStarter: string | null;
+  winPitcher: string | null;
+  losePitcher: string | null;
+  homeRheb: RHEB | null;
+  awayRheb: RHEB | null;
 }

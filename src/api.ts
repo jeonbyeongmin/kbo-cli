@@ -1,15 +1,28 @@
 import type {
   BatterStats,
   CurrentGameState,
+  GameStatus,
   LineupPlayer,
   NormalizedGame,
   PitcherStats,
   PlayerRanking,
+  RHEB,
   ScheduleGame,
   TeamStat,
   TextRelayData,
   TopPlayerCategory,
 } from "./types.ts";
+
+// watch 가 자동 선택하는 상태. CANCEL 만 제외 — 점수/라인업/결과가 모두 비어 박스 가치가 낮다.
+export function isPlayable(status: GameStatus): boolean {
+  return (
+    status === "STARTED" ||
+    status === "BEFORE" ||
+    status === "READY" ||
+    status === "RESULT" ||
+    status === "SUSPENDED"
+  );
+}
 
 const BASE = "https://api-gw.sports.naver.com";
 const UA = "kbo-cli/0.1 (+https://github.com/jeonbyeongmin/kbo-cli; personal use)";
@@ -49,8 +62,11 @@ export async function fetchSchedule(date: string): Promise<ScheduleGame[]> {
   return data.games.filter((g) => g.categoryId === "kbo" && g.homeTeamName && g.awayTeamName);
 }
 
-export async function fetchRelay(gameId: string): Promise<TextRelayData> {
-  const data = await getJson<{ textRelayData: TextRelayData }>(`/schedule/games/${gameId}/relay`);
+// BEFORE 상태 게임은 textRelayData 가 null 로 내려온다.
+export async function fetchRelay(gameId: string): Promise<TextRelayData | null> {
+  const data = await getJson<{ textRelayData: TextRelayData | null }>(
+    `/schedule/games/${gameId}/relay`
+  );
   return data.textRelayData;
 }
 
@@ -167,12 +183,16 @@ function buildPitcherStats(p: LineupPlayer | null): PitcherStats | null {
   return { name: p.name, pcode: p.pcode, seasonEra, todayEra, todayLine };
 }
 
+// API 가 이닝 구분으로 끼워넣는 sentinel — 의미 없으니 항상 제거.
+const SENTINEL_RE = /^=+$/;
+
 function collectRecentPlays(relay: TextRelayData, max = 6): string[] {
   const plays: { seq: number; text: string }[] = [];
   for (const ab of relay.textRelays) {
     for (const opt of ab.textOptions) {
       const txt = (opt.text ?? "").trim();
       if (!txt) continue;
+      if (SENTINEL_RE.test(txt)) continue;
       plays.push({ seq: opt.seqno ?? 0, text: txt });
     }
   }
@@ -188,7 +208,67 @@ function collectRecentPlays(relay: TextRelayData, max = 6): string[] {
   return out;
 }
 
-export function normalize(schedule: ScheduleGame, relay: TextRelayData): NormalizedGame {
+function parseRheb(arr: number[] | null | undefined): RHEB | null {
+  if (!arr || arr.length < 4) return null;
+  return { r: arr[0]!, h: arr[1]!, e: arr[2]!, b: arr[3]! };
+}
+
+function scheduleMeta(
+  schedule: ScheduleGame
+): Pick<
+  NormalizedGame,
+  | "gameDateTime"
+  | "stadium"
+  | "weather"
+  | "broadChannel"
+  | "winner"
+  | "homeStarter"
+  | "awayStarter"
+  | "winPitcher"
+  | "losePitcher"
+  | "homeRheb"
+  | "awayRheb"
+> {
+  return {
+    gameDateTime: schedule.gameDateTime,
+    stadium: schedule.stadium ?? null,
+    weather: schedule.weatherInfo?.weather ?? null,
+    broadChannel: schedule.broadChannel ?? null,
+    winner: schedule.winner ?? null,
+    homeStarter: schedule.homeStarterName ?? null,
+    awayStarter: schedule.awayStarterName ?? null,
+    winPitcher: schedule.winPitcherName ?? null,
+    losePitcher: schedule.losePitcherName ?? null,
+    homeRheb: parseRheb(schedule.homeTeamRheb),
+    awayRheb: parseRheb(schedule.awayTeamRheb),
+  };
+}
+
+export function normalize(schedule: ScheduleGame, relay: TextRelayData | null): NormalizedGame {
+  if (!relay) {
+    return {
+      gameId: schedule.gameId,
+      homeTeamName: schedule.homeTeamName,
+      awayTeamName: schedule.awayTeamName,
+      homeTeamCode: schedule.homeTeamCode,
+      awayTeamCode: schedule.awayTeamCode,
+      homeScore: Number(schedule.homeTeamScore ?? 0),
+      awayScore: Number(schedule.awayTeamScore ?? 0),
+      inning: 1,
+      topBottom: "top",
+      ball: 0,
+      strike: 0,
+      out: 0,
+      bases: { first: false, second: false, third: false },
+      batterStats: null,
+      pitcherStats: null,
+      recentPlays: [],
+      inningLine: { home: [], away: [] },
+      status: schedule.statusCode,
+      fetchedAt: Date.now(),
+      ...scheduleMeta(schedule),
+    };
+  }
   const cs: CurrentGameState = relay.currentGameState;
   const awayBatting = relay.homeOrAway === "0";
   const findBatter = awayBatting
@@ -236,6 +316,7 @@ export function normalize(schedule: ScheduleGame, relay: TextRelayData): Normali
     inningLine: { home: inningLineHome, away: inningLineAway },
     status: schedule.statusCode,
     fetchedAt: Date.now(),
+    ...scheduleMeta(schedule),
   };
 }
 
