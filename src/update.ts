@@ -8,7 +8,8 @@ import pkg from "../package.json" with { type: "json" };
 const REGISTRY_URL = "https://registry.npmjs.org/kbo-cli/latest";
 const CACHE_DIR = path.join(os.homedir(), ".cache", "kbo-cli");
 const CACHE_FILE = path.join(CACHE_DIR, "update-check.json");
-const CHECK_TTL_MS = 24 * 60 * 60 * 1000;
+const CHECK_TTL_MS = 60 * 60 * 1000;
+const STALE_TTL_MS = 5 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 5000;
 
 interface CacheEntry {
@@ -75,7 +76,11 @@ function detectInstallCommand(): string {
 export function maybeTriggerBackgroundCheck(): void {
   if (process.env.KBO_NO_UPDATE_CHECK === "1") return;
   const cache = readCache();
-  if (cache && Date.now() - cache.lastCheck < CHECK_TTL_MS) return;
+  if (cache) {
+    const elapsed = Date.now() - cache.lastCheck;
+    const ttl = compareVersion(cache.latest, CURRENT_VERSION) > 0 ? CHECK_TTL_MS : STALE_TTL_MS;
+    if (elapsed < ttl) return;
+  }
 
   try {
     const entry = process.argv[1];
