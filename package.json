@@ -1,6 +1,6 @@
 {
   "name": "kbo-cli",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "KBO 라이브 중계 TUI CLI — terminal-based KBO baseball live scoreboard",
   "keywords": [
     "kbo",
