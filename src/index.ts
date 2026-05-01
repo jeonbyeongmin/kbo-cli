@@ -145,7 +145,7 @@ async function main(): Promise<void> {
 
   if (args.cmd !== "update") {
     const banner = getUpdateBanner();
-    if (banner) console.log(banner + "\n");
+    if (banner) console.log(`${banner}\n`);
     maybeTriggerBackgroundCheck();
   }
 

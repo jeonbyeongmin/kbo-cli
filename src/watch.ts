@@ -90,19 +90,19 @@ export async function watch(opts: WatchOptions): Promise<void> {
     } else if (lastError) {
       body = `\n  ${lastError}\n`;
     } else {
-      body = `\n  로딩 중...\n`;
+      body = "\n  로딩 중...\n";
     }
     const ctxLine =
       liveGames.length > 1
         ? `\n  [${idx + 1}/${liveGames.length}] ${liveGames[idx]!.awayTeamName} vs ${liveGames[idx]!.homeTeamName}`
         : "";
-    const out = body + ctxLine + "\n";
+    const out = `${body + ctxLine}\n`;
 
     // overwrite frame: home cursor, clear each line as we go
     process.stdout.write(HOME);
     const lines = out.split("\n");
     for (const line of lines) {
-      process.stdout.write(CLEAR_LINE + line + "\n");
+      process.stdout.write(`${CLEAR_LINE + line}\n`);
     }
     process.stdout.write(CLEAR_AFTER);
   };
