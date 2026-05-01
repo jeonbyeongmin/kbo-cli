@@ -36,7 +36,7 @@
     "dev": "bun run src/index.ts",
     "build": "bun run scripts/build.ts",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "bun run typecheck && bun run build"
+    "prepublishOnly": "command -v bun >/dev/null || export PATH=\"$HOME/.bun/bin:$PATH\"; bun run typecheck && bun run build"
   },
   "dependencies": {
     "picocolors": "^1.0.1"
