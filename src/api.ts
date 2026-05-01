@@ -4,6 +4,7 @@ import type {
   LineupPlayer,
   NormalizedGame,
   PitcherStats,
+  PlayerRanking,
   ScheduleGame,
   TeamStat,
   TextRelayData,
@@ -76,6 +77,32 @@ export async function fetchLeaderboards(
     `/statistics/categories/${STATS_CATEGORY}/seasons/${seasonCode}/top-players?playerType=${playerType}&limit=30&includeFields=`
   );
   return data.topPlayers ?? [];
+}
+
+export interface FetchPlayersOptions {
+  playerType: "HITTER" | "PITCHER";
+  field: string;
+  direction: "ASC" | "DESC";
+  teamCode?: string;
+  pageSize?: number;
+}
+
+export async function fetchPlayers(
+  seasonCode: string,
+  opts: FetchPlayersOptions
+): Promise<PlayerRanking[]> {
+  const params = new URLSearchParams({
+    playerType: opts.playerType,
+    field: opts.field,
+    direction: opts.direction,
+    pageSize: String(opts.pageSize ?? 100),
+    page: "1",
+  });
+  if (opts.teamCode) params.set("teamCode", opts.teamCode);
+  const data = await getJson<{ seasonPlayerStats: PlayerRanking[] }>(
+    `/statistics/categories/${STATS_CATEGORY}/seasons/${seasonCode}/players?${params}`
+  );
+  return data.seasonPlayerStats ?? [];
 }
 
 export function currentSeasonCode(): string {
