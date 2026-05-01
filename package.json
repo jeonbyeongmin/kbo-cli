@@ -36,16 +36,25 @@
     "dev": "bun run src/index.ts",
     "build": "bun run scripts/build.ts",
     "typecheck": "tsc --noEmit",
+    "format": "biome format --write .",
+    "lint": "biome lint --write .",
+    "check": "biome check --write .",
+    "check:ci": "biome check .",
+    "test": "bun test",
     "prepublishOnly": "command -v bun >/dev/null || export PATH=\"$HOME/.bun/bin:$PATH\"; bun run typecheck && bun run build"
   },
   "dependencies": {
     "picocolors": "^1.0.1"
   },
   "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
     "@types/bun": "latest",
     "typescript": "^5.6.0"
   },
   "engines": {
     "node": ">=18"
-  }
+  },
+  "trustedDependencies": [
+    "@biomejs/biome"
+  ]
 }
