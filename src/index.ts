@@ -96,14 +96,13 @@ async function cmdToday(args: Args): Promise<void> {
   console.log(renderScheduleList(games, args.date));
 }
 
-// watch 박스 회전 순서 — 라이브 > 시작 전 > 중단 > 종료. CANCEL 은 isPlayable 에서 빠져 도달하지 않음.
-const STATUS_RANK: Record<GameStatus, number> = {
+// watch 박스 회전 순서 — 라이브 > 시작 전 > 중단 > 종료. isPlayable 에서 빠진 status 는 정의하지 않는다.
+const STATUS_RANK: Partial<Record<GameStatus, number>> = {
   STARTED: 0,
   BEFORE: 1,
   READY: 1,
   SUSPENDED: 2,
   RESULT: 3,
-  CANCEL: 99,
 };
 
 async function cmdWatch(args: Args): Promise<void> {

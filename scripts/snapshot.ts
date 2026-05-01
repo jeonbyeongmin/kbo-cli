@@ -46,12 +46,13 @@ async function main(): Promise<void> {
       console.error(`${date} 일정 없음`);
       process.exit(1);
     }
-    // /schedule/games 응답은 메타가 빈약 (stadium/starter/weather 없음).
-    // 단일 게임 endpoint 로 보강해서 풍부한 schedule 로 저장.
-    for (const g of games) {
-      const rich = await fetchGameBasic(g.gameId);
-      await snapshot(rich);
-    }
+    // /schedule/games 응답은 메타가 빈약 (stadium/starter/weather 없음) — 단일 게임 endpoint 로 보강.
+    await Promise.all(
+      games.map(async (g) => {
+        const rich = await fetchGameBasic(g.gameId);
+        await snapshot(rich);
+      })
+    );
   } else {
     // /schedule/games?date= 는 today 만 신뢰할 수 있어, 단일 게임은 /schedule/games/<id> 로 직접 조회.
     const gameId = argv[0]!;
