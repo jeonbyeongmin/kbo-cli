@@ -1,5 +1,11 @@
 import pc from "picocolors";
-import type { BatterStats, NormalizedGame, PitcherStats, ScheduleGame } from "./types.ts";
+import type {
+  BatterStats,
+  GameStatus,
+  NormalizedGame,
+  PitcherStats,
+  ScheduleGame,
+} from "./types.ts";
 
 const TEAM_HEX: Record<string, string> = {
   LG: "#C30452",
@@ -138,14 +144,18 @@ function timeStr(ts: number): string {
 
 const NAME_COL = 10;
 
-export function truncName(name: string): string {
-  if (visualWidth(name) <= NAME_COL) return name;
+export function trimToWidth(s: string, max: number): string {
+  if (visualWidth(s) <= max) return s;
   let acc = "";
-  for (const ch of name) {
-    if (visualWidth(acc + ch) > NAME_COL - 1) break;
+  for (const ch of s) {
+    if (visualWidth(acc + ch) > max - 1) break;
     acc += ch;
   }
   return `${acc}…`;
+}
+
+export function truncName(name: string): string {
+  return trimToWidth(name, NAME_COL);
 }
 
 function renderBatterSection(b: BatterStats | null): string[] {
@@ -185,34 +195,55 @@ function renderPitcherSection(p: PitcherStats | null): string[] {
   return lines;
 }
 
-export function renderGame(game: NormalizedGame, opts: { staleSec?: number } = {}): string {
-  const stale = opts.staleSec ?? 0;
-  const headerStatus =
-    game.status === "STARTED"
-      ? `${inningLabel(game.inning, game.topBottom)} ${game.out}사`
-      : game.status === "RESULT"
-        ? "경기 종료"
-        : game.status === "READY"
-          ? "경기 전"
-          : game.status;
-  const staleTag = stale > 5 ? pc.yellow(` ⚠ stale ${stale}s`) : "";
-  const title = `KBO LIVE · ${headerStatus}${staleTag}`;
+// RESULT 의 하이라이트는 결과 카드와 중복되거나 의미 약한 라인을 더 정제한다.
+const SIMPLE_COUNT_RE = /^\d+구\s*(볼|스트라이크|파울|타격|헛스윙|번트)/;
+const RESULT_META_RE = /^(승리투수|패전투수|세이브투수|결승타|블론세이브|홀드)\s*:/;
 
-  const body: string[] = [];
+function filterResultHighlights(plays: string[]): string[] {
+  return plays.filter((p) => !SIMPLE_COUNT_RE.test(p) && !RESULT_META_RE.test(p));
+}
 
+function teamScoreLine(name: string, score: number, suffix = ""): string {
+  return `  ${padEnd(colorTeam(name), 8)}  ${pc.bold(String(score).padStart(2))}${suffix}`;
+}
+
+function labelValueRows(rows: [string, string | null | undefined][]): string[] {
+  return rows
+    .filter(([, v]) => v != null && v !== "")
+    .map(([label, value]) => `  ${padEnd(pc.dim(label), NAME_COL)}  ${value}`);
+}
+
+function inningLineSection(game: NormalizedGame): string[] {
+  if (game.inningLine.away.length === 0) return [];
+  const innings = game.inningLine.away.length;
+  const headerCells = Array.from({ length: innings }, (_, i) => String(i + 1).padStart(2)).join(
+    " "
+  );
+  return [
+    `  ${pc.dim(padEnd("회", 6))} ${pc.dim(headerCells)}`,
+    `  ${padEnd(game.awayTeamName, 6)} ${game.inningLine.away.map((v) => v.padStart(2)).join(" ")}`,
+    `  ${padEnd(game.homeTeamName, 6)} ${game.inningLine.home.map((v) => v.padStart(2)).join(" ")}`,
+  ];
+}
+
+function renderStartedBody(game: NormalizedGame): string[] {
+  const body: string[] = [""];
+  body.push(
+    teamScoreLine(
+      game.awayTeamName,
+      game.awayScore,
+      game.topBottom === "top" ? pc.cyan("  ◀ 공격") : ""
+    )
+  );
+  body.push(
+    teamScoreLine(
+      game.homeTeamName,
+      game.homeScore,
+      game.topBottom === "bottom" ? pc.cyan("  ◀ 공격") : ""
+    )
+  );
   body.push("");
-  // Score block
-  const awayLine = `  ${padEnd(colorTeam(game.awayTeamName), 8)}  ${pc.bold(
-    String(game.awayScore).padStart(2)
-  )}`;
-  const homeLine = `  ${padEnd(colorTeam(game.homeTeamName), 8)}  ${pc.bold(
-    String(game.homeScore).padStart(2)
-  )}`;
-  body.push(awayLine + (game.topBottom === "top" ? pc.cyan("  ◀ 공격") : ""));
-  body.push(homeLine + (game.topBottom === "bottom" ? pc.cyan("  ◀ 공격") : ""));
-  body.push("");
 
-  // Diamond + count side by side
   const diamond = diamondLines(game.bases);
   const countBlock = [
     "",
@@ -222,44 +253,138 @@ export function renderGame(game: NormalizedGame, opts: { staleSec?: number } = {
     "",
   ];
   for (let i = 0; i < diamond.length; i++) {
-    const left = diamond[i] ?? "";
-    const right = countBlock[i] ?? "";
-    body.push(`${left}    ${right}`);
+    body.push(`${diamond[i] ?? ""}    ${countBlock[i] ?? ""}`);
   }
   body.push("");
 
-  // Batter / Pitcher
-  if (game.status === "STARTED") {
-    for (const ln of renderBatterSection(game.batterStats)) body.push(ln);
-    body.push("");
-    for (const ln of renderPitcherSection(game.pitcherStats)) body.push(ln);
+  for (const ln of renderBatterSection(game.batterStats)) body.push(ln);
+  body.push("");
+  for (const ln of renderPitcherSection(game.pitcherStats)) body.push(ln);
+  body.push("");
+
+  const inningLines = inningLineSection(game);
+  if (inningLines.length > 0) {
+    for (const ln of inningLines) body.push(ln);
     body.push("");
   }
 
-  // Inning line score
-  if (game.inningLine.away.length > 0) {
-    const innings = game.inningLine.away.length;
-    const headerCells = Array.from({ length: innings }, (_, i) => String(i + 1).padStart(2)).join(
-      " "
-    );
-    body.push(`  ${pc.dim(padEnd("회", 6))} ${pc.dim(headerCells)}`);
-    const awayCells = game.inningLine.away.map((v) => v.padStart(2)).join(" ");
-    const homeCells = game.inningLine.home.map((v) => v.padStart(2)).join(" ");
-    body.push(`  ${padEnd(game.awayTeamName, 6)} ${awayCells}`);
-    body.push(`  ${padEnd(game.homeTeamName, 6)} ${homeCells}`);
-    body.push("");
-  }
-
-  // Recent plays
   if (game.recentPlays.length > 0) {
     body.push(pc.dim("  ─ 최근 플레이 ─"));
     for (const p of game.recentPlays.slice(0, 5)) {
-      const trimmed = p.length > W - 6 ? `${p.slice(0, W - 8)}…` : p;
-      body.push(`  • ${trimmed}`);
+      body.push(`  • ${trimToWidth(p, W - 4)}`);
     }
   }
+  return body;
+}
 
-  const footer = `q:종료  r:새로고침  ←/→:경기전환  · ${timeStr(game.fetchedAt)}`;
+function renderResultBody(game: NormalizedGame): string[] {
+  const body: string[] = [""];
+  const awayMark = game.winner === "AWAY" ? pc.yellow("  ★") : "";
+  const homeMark = game.winner === "HOME" ? pc.yellow("  ★") : "";
+  body.push(teamScoreLine(game.awayTeamName, game.awayScore, awayMark));
+  body.push(teamScoreLine(game.homeTeamName, game.homeScore, homeMark));
+  body.push("");
+
+  if (game.homeRheb && game.awayRheb) {
+    body.push(pc.dim("  ─ 박스스코어 ─"));
+    const head = ["R", "H", "E", "B"].map((c) => c.padStart(3)).join(" ");
+    body.push(`  ${padEnd("", 6)} ${pc.dim(head)}`);
+    const cells = (r: { r: number; h: number; e: number; b: number }) =>
+      [r.r, r.h, r.e, r.b].map((n) => String(n).padStart(3)).join(" ");
+    body.push(`  ${padEnd(game.awayTeamName, 6)} ${cells(game.awayRheb)}`);
+    body.push(`  ${padEnd(game.homeTeamName, 6)} ${cells(game.homeRheb)}`);
+    body.push("");
+  }
+
+  const starterMatch =
+    game.awayStarter || game.homeStarter
+      ? `${game.awayStarter ?? "?"}  vs  ${game.homeStarter ?? "?"}`
+      : null;
+  const resultLines = labelValueRows([
+    ["승리투수", game.winPitcher],
+    ["패전투수", game.losePitcher],
+    ["선발", starterMatch],
+  ]);
+  if (resultLines.length > 0) {
+    body.push(pc.dim("  ─ 결과 ─"));
+    for (const ln of resultLines) body.push(ln);
+    body.push("");
+  }
+
+  const inningLines = inningLineSection(game);
+  if (inningLines.length > 0) {
+    for (const ln of inningLines) body.push(ln);
+    body.push("");
+  }
+
+  const highlights = filterResultHighlights(game.recentPlays);
+  if (highlights.length > 0) {
+    body.push(pc.dim("  ─ 하이라이트 ─"));
+    for (const p of highlights.slice(0, 5)) {
+      body.push(`  • ${trimToWidth(p, W - 4)}`);
+    }
+  }
+  return body;
+}
+
+function renderReadyBody(game: NormalizedGame): string[] {
+  const body: string[] = [""];
+  body.push(teamScoreLine(game.awayTeamName, game.awayScore));
+  body.push(teamScoreLine(game.homeTeamName, game.homeScore));
+  body.push("");
+
+  if (game.awayStarter || game.homeStarter) {
+    body.push(pc.dim("  ─ 선발 ─"));
+    body.push(`  ${padEnd(game.awayTeamName, 6)} ${game.awayStarter ?? pc.dim("미정")}`);
+    body.push(`  ${padEnd(game.homeTeamName, 6)} ${game.homeStarter ?? pc.dim("미정")}`);
+    body.push("");
+  }
+
+  const infoLines = labelValueRows([
+    ["시작", game.gameDateTime ? game.gameDateTime.slice(11, 16) : null],
+    ["구장", game.stadium],
+    ["날씨", game.weather],
+    ["중계", game.broadChannel],
+  ]);
+  if (infoLines.length > 0) {
+    body.push(pc.dim("  ─ 경기 정보 ─"));
+    for (const ln of infoLines) body.push(ln);
+  }
+  return body;
+}
+
+const HEADER_LABEL: Record<GameStatus, (g: NormalizedGame) => string> = {
+  STARTED: (g) => `${inningLabel(g.inning, g.topBottom)} ${g.out}사`,
+  RESULT: () => "경기 종료",
+  READY: () => "경기 전",
+  BEFORE: () => "경기 전",
+  CANCEL: () => "경기 취소",
+  SUSPENDED: () => "경기 중단",
+};
+
+const BODY_RENDERERS: Record<GameStatus, (g: NormalizedGame) => string[]> = {
+  STARTED: renderStartedBody,
+  RESULT: renderResultBody,
+  READY: renderReadyBody,
+  BEFORE: renderReadyBody,
+  CANCEL: renderReadyBody,
+  SUSPENDED: renderReadyBody,
+};
+
+export function renderGame(
+  game: NormalizedGame,
+  opts: { staleSec?: number; multiGame?: boolean } = {}
+): string {
+  const stale = opts.staleSec ?? 0;
+  const headerStatus = HEADER_LABEL[game.status](game);
+  const venue = game.stadium ? pc.dim(` · ${game.stadium}`) : "";
+  const staleTag = stale > 0 ? pc.yellow(` ⚠ stale ${stale}s`) : "";
+  const title = `KBO LIVE · ${headerStatus}${venue}${staleTag}`;
+
+  const body = BODY_RENDERERS[game.status](game);
+
+  const switchHint = opts.multiGame ? "  ←/→:경기전환" : "";
+  const footer = `q:종료  r:새로고침${switchHint}  · ${timeStr(game.fetchedAt)}`;
   return frame(title, body, footer).join("\n");
 }
 
@@ -273,18 +398,18 @@ export function renderScheduleList(games: ScheduleGame[], date: string): string 
   }
   for (const g of games) {
     const time = g.gameDateTime.slice(11, 16);
+    const isReady = g.statusCode === "READY" || g.statusCode === "BEFORE";
     const status =
       g.statusCode === "STARTED"
         ? pc.green("● LIVE")
         : g.statusCode === "RESULT"
           ? pc.dim("종료  ")
-          : g.statusCode === "READY"
+          : isReady
             ? pc.cyan("예정  ")
             : pc.yellow(g.statusInfo || g.statusCode);
-    const score =
-      g.statusCode === "READY"
-        ? pc.dim("      ")
-        : `${String(g.awayTeamScore).padStart(2)} ${pc.dim("-")} ${String(g.homeTeamScore).padEnd(2)}`;
+    const score = isReady
+      ? pc.dim("      ")
+      : `${String(g.awayTeamScore).padStart(2)} ${pc.dim("-")} ${String(g.homeTeamScore).padEnd(2)}`;
     const away = padStart(colorTeam(g.awayTeamName), 4);
     const home = padEnd(colorTeam(g.homeTeamName), 4);
     lines.push(`  ${status}  ${time}  ${away}  ${score}  ${home}  ${pc.dim(g.gameId)}`);

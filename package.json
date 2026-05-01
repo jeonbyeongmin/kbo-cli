@@ -37,6 +37,8 @@
     "check": "biome check --write .",
     "check:ci": "biome check .",
     "test": "bun test --pass-with-no-tests",
+    "snapshot": "bun run scripts/snapshot.ts",
+    "render:fixture": "bun run scripts/render-fixture.ts",
     "prepublishOnly": "command -v bun >/dev/null || export PATH=\"$HOME/.bun/bin:$PATH\"; bun run typecheck && bun run build"
   },
   "dependencies": {

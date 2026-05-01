@@ -21,7 +21,10 @@ src/
   watch.ts    # 폴링 루프, alt-screen, 키 입력 핸들링
   update.ts   # npm registry 백그라운드 버전 체크, self-update
 scripts/
-  build.ts    # bun build 래퍼 (shebang 주입, chmod +x)
+  build.ts          # bun build 래퍼 (shebang 주입, chmod +x)
+  snapshot.ts       # Naver 응답을 fixtures/<gameId>.json 으로 캡처
+  render-fixture.ts # fixture 를 stdout 한 프레임 렌더 (라이브 없이 화면 검증)
+fixtures/           # gitignored — snapshot 결과물
 ```
 
 ## 자주 쓰는 명령
@@ -35,10 +38,22 @@ bun run check:ci     # biome check . (수정 없이 검사만 — CI/스킬용)
 bun run format       # biome format --write .
 bun run lint         # biome lint --write .
 bun test             # 내장 테스트 러너 (테스트 0개여도 exit 0)
+
+bun run snapshot <gameId>            # 단일 게임 fixture 캡처 (과거 게임도 가능)
+bun run snapshot --date YYYY-MM-DD   # 해당 날짜 전 경기 (today 만 안정적)
+bun run render:fixture                       # fixtures/ 전부 렌더
+bun run render:fixture <path>                # 단일 fixture
+bun run render:fixture <path> --status <code>  # 상태 오버라이드 (RESULT 캡처로 STARTED 화면 검증)
+bun run render:fixture <path> --stale <sec>    # stale 경고 강제
 ```
 
-UI/렌더 변경 후에는 `bun run dev today`, `bun run dev watch --game <id>` 로
-실제 터미널 출력을 확인하고 끝낸다. 타입 통과 ≠ 렌더 정상.
+UI/렌더 변경 후에는 화면을 직접 확인하고 끝낸다 — 타입 통과 ≠ 렌더 정상.
+
+- 라이브 경기가 있으면: `bun run dev today`, `bun run dev watch --game <id>`.
+- 라이브가 없으면: `bun run snapshot <gameId>` 로 STARTED/RESULT/BEFORE 상태별
+  fixture 를 한두 개 캡처해두고 `bun run render:fixture` 로 모드별 한 프레임을
+  stdout 에 그려 검증한다. RESULT 캡처에 `--status STARTED` 를 붙이면 라이브
+  위젯(다이아몬드/카운트/타자·투수)도 강제로 그려볼 수 있다.
 
 PR 을 올릴 때는 `/pr` 스킬을 쓴다. `/simplify` → biome check → typecheck →
 build → bun test 5단계 검증을 통과시킨 뒤 develop 으로 PR 을 만든다.

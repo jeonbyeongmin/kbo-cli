@@ -1,4 +1,4 @@
-import { fetchRelay, fetchSchedule, normalize, todayDate } from "./api.ts";
+import { fetchRelay, fetchSchedule, isPlayable, normalize, todayDate } from "./api.ts";
 import { renderGame } from "./render.ts";
 import type { NormalizedGame, ScheduleGame } from "./types.ts";
 
@@ -81,12 +81,20 @@ export async function watch(opts: WatchOptions): Promise<void> {
     });
   }
 
+  // 폴링 주기보다 살짝 여유 있게 임계값을 잡는다 — 5초 주기면 11초 넘어야 stale.
+  const staleThreshold = opts.intervalSec * 2 + 1;
+
   const draw = () => {
     if (stopped) return;
     let body: string;
     if (lastGame) {
+      // RESULT/READY/BEFORE/SUSPENDED 는 변할 일이 거의 없어 stale 경고가 의미 없음 — STARTED 만 표시.
       const stale = Math.floor((Date.now() - lastFetch) / 1000);
-      body = renderGame(lastGame, { staleSec: stale });
+      const isLive = lastGame.status === "STARTED";
+      body = renderGame(lastGame, {
+        staleSec: isLive && stale > staleThreshold ? stale : 0,
+        multiGame: liveGames.length > 1,
+      });
     } else if (lastError) {
       body = `\n  ${lastError}\n`;
     } else {
@@ -124,12 +132,12 @@ export async function watch(opts: WatchOptions): Promise<void> {
     }
   };
 
-  // periodic refresh of game schedule (in case more games go live)
+  // periodic refresh — BEFORE 가 STARTED 로 전환되거나 새 경기가 시작되는 걸 따라잡는다.
   const refreshSchedule = async () => {
     try {
       const all = await fetchSchedule(todayDate());
-      const live = all.filter((g) => g.statusCode === "STARTED");
-      if (live.length > 0) liveGames = live;
+      const playable = all.filter((g) => isPlayable(g.statusCode));
+      if (playable.length > 0) liveGames = playable;
     } catch {
       // ignore
     }
