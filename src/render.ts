@@ -14,7 +14,7 @@ const TEAM_COLOR: Record<string, (s: string) => string> = {
   키움: pc.magenta,
 };
 
-function colorTeam(name: string): string {
+export function colorTeam(name: string): string {
   const fn = TEAM_COLOR[name];
   return fn ? fn(pc.bold(name)) : pc.bold(name);
 }
@@ -22,7 +22,7 @@ function colorTeam(name: string): string {
 // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences require \x1b
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 
-function visualWidth(s: string): number {
+export function visualWidth(s: string): number {
   const stripped = s.replace(ANSI_RE, "");
   let w = 0;
   for (const ch of stripped) {
@@ -49,7 +49,7 @@ function visualWidth(s: string): number {
   return w;
 }
 
-function padEnd(s: string, width: number): string {
+export function padEnd(s: string, width: number): string {
   const w = visualWidth(s);
   if (w >= width) return s;
   return s + " ".repeat(width - w);
@@ -57,15 +57,20 @@ function padEnd(s: string, width: number): string {
 
 const W = 56; // inner width of box
 
-function frame(title: string, body: string[], footer: string): string[] {
-  const top = `┌─ ${title} ${"─".repeat(Math.max(0, W - visualWidth(title) - 3))}┐`;
-  const bot = `└${"─".repeat(W)}┘`;
+export function frame(
+  title: string,
+  body: string[],
+  footer: string,
+  innerWidth: number = W
+): string[] {
+  const top = `┌─ ${title} ${"─".repeat(Math.max(0, innerWidth - visualWidth(title) - 3))}┐`;
+  const bot = `└${"─".repeat(innerWidth)}┘`;
   const lines = [top];
   for (const line of body) {
-    lines.push(`│ ${padEnd(line, W - 2)} │`);
+    lines.push(`│ ${padEnd(line, innerWidth - 2)} │`);
   }
-  lines.push(`├${"─".repeat(W)}┤`);
-  lines.push(`│ ${padEnd(footer, W - 2)} │`);
+  lines.push(`├${"─".repeat(innerWidth)}┤`);
+  lines.push(`│ ${padEnd(footer, innerWidth - 2)} │`);
   lines.push(bot);
   return lines;
 }
@@ -103,7 +108,7 @@ function timeStr(ts: number): string {
 
 const NAME_COL = 10;
 
-function truncName(name: string): string {
+export function truncName(name: string): string {
   if (visualWidth(name) <= NAME_COL) return name;
   let acc = "";
   for (const ch of name) {

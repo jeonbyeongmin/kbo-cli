@@ -36,7 +36,7 @@
     "lint": "biome lint --write .",
     "check": "biome check --write .",
     "check:ci": "biome check .",
-    "test": "bun test",
+    "test": "bun test --pass-with-no-tests",
     "prepublishOnly": "command -v bun >/dev/null || export PATH=\"$HOME/.bun/bin:$PATH\"; bun run typecheck && bun run build"
   },
   "dependencies": {

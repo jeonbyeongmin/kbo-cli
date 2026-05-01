@@ -5,7 +5,9 @@ import type {
   NormalizedGame,
   PitcherStats,
   ScheduleGame,
+  TeamStat,
   TextRelayData,
+  TopPlayerCategory,
 } from "./types.ts";
 
 const BASE = "https://api-gw.sports.naver.com";
@@ -54,6 +56,30 @@ export async function fetchRelay(gameId: string): Promise<TextRelayData> {
 export async function fetchGameBasic(gameId: string): Promise<ScheduleGame> {
   const data = await getJson<{ game: ScheduleGame }>(`/schedule/games/${gameId}`);
   return data.game;
+}
+
+// statistics 계열은 categoryId 가 "kbo" — schedule 의 "kbaseball" 과 다르다.
+const STATS_CATEGORY = "kbo";
+
+export async function fetchStandings(seasonCode: string): Promise<TeamStat[]> {
+  const data = await getJson<{ seasonTeamStats: TeamStat[] }>(
+    `/statistics/categories/${STATS_CATEGORY}/seasons/${seasonCode}/teams`
+  );
+  return data.seasonTeamStats ?? [];
+}
+
+export async function fetchLeaderboards(
+  seasonCode: string,
+  playerType: "HITTER" | "PITCHER"
+): Promise<TopPlayerCategory[]> {
+  const data = await getJson<{ topPlayers: TopPlayerCategory[] }>(
+    `/statistics/categories/${STATS_CATEGORY}/seasons/${seasonCode}/top-players?playerType=${playerType}&limit=30&includeFields=`
+  );
+  return data.topPlayers ?? [];
+}
+
+export function currentSeasonCode(): string {
+  return String(new Date().getFullYear());
 }
 
 function findPlayer(...lineups: LineupPlayer[][]): (pcode: string) => LineupPlayer | null {

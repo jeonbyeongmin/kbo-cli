@@ -121,6 +121,100 @@ export interface TextRelayData {
   pitcherVsBatterCareerStats?: string;
 }
 
+export interface TeamStat {
+  teamId: string;
+  teamName: string;
+  teamShortName?: string;
+  teamImageUrl?: string;
+  seasonId?: string;
+  year?: number;
+  upperCategoryId?: string;
+  categoryId?: string;
+  gameType?: string;
+  ranking: number;
+  wra: number | null;
+  gameCount: number | null;
+  winGameCount: number | null;
+  drawnGameCount: number | null;
+  loseGameCount: number | null;
+  gameBehind: number | null;
+  continuousGameResult?: string;
+  lastFiveGames?: string;
+  // 공격
+  offenseHra?: number | null;
+  offenseRun?: number | null;
+  offenseHr?: number | null;
+  offenseRbi?: number | null;
+  offenseHit?: number | null;
+  offenseH2?: number | null;
+  offenseH3?: number | null;
+  offenseSb?: number | null;
+  offenseBb?: number | null;
+  offenseHp?: number | null;
+  offenseBbhp?: number | null;
+  offenseKk?: number | null;
+  offenseObp?: number | null;
+  offenseSlg?: number | null;
+  offenseOps?: number | null;
+  // 수비/투수
+  defenseEra?: number | null;
+  defenseInning?: number | null;
+  defenseHit?: number | null;
+  defenseHr?: number | null;
+  defenseKk?: number | null;
+  defenseErr?: number | null;
+  defenseWhip?: number | null;
+  defenseQs?: number | null;
+  defenseSave?: number | null;
+  defenseHold?: number | null;
+  defenseWp?: number | null;
+}
+
+export interface PlayerRanking {
+  ranking: number;
+  playerId: string;
+  playerName: string;
+  playerImageUrl?: string;
+  backNumber?: number;
+  teamId: string;
+  teamName: string;
+  teamShortName?: string;
+  teamImageUrl?: string;
+  seasonId?: string;
+  categoryId?: string;
+  // 카테고리에 따라 채워지는 필드 (네이버 응답 그대로)
+  hitterHra?: number | null;
+  hitterHr?: number | null;
+  hitterRbi?: number | null;
+  hitterRun?: number | null;
+  hitterHit?: number | null;
+  hitterH2?: number | null;
+  hitterH3?: number | null;
+  hitterAb?: number | null;
+  hitterSb?: number | null;
+  hitterBb?: number | null;
+  hitterKk?: number | null;
+  hitterObp?: number | null;
+  hitterSlg?: number | null;
+  hitterOps?: number | null;
+  hitterIsop?: number | null;
+  pitcherEra?: number | null;
+  pitcherWin?: number | null;
+  pitcherLose?: number | null;
+  pitcherInning?: string | number | null;
+  pitcherKk?: number | null;
+  pitcherSave?: number | null;
+  pitcherHold?: number | null;
+  pitcherWhip?: number | null;
+  pitcherBb?: number | null;
+  pitcherHit?: number | null;
+}
+
+export interface TopPlayerCategory {
+  type: string;
+  rankings: PlayerRanking[];
+}
+
 export interface NormalizedGame {
   gameId: string;
   homeTeamName: string;
