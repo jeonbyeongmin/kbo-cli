@@ -54,16 +54,6 @@ export async function fetchGameBasic(gameId: string): Promise<ScheduleGame> {
   return data.game;
 }
 
-function findName(...lineups: LineupPlayer[][]): (pcode: string) => string {
-  return (pcode: string) => {
-    for (const list of lineups) {
-      const hit = list.find((p) => p.pcode === pcode);
-      if (hit) return hit.name;
-    }
-    return "";
-  };
-}
-
 function findPlayer(...lineups: LineupPlayer[][]): (pcode: string) => LineupPlayer | null {
   return (pcode: string) => {
     for (const list of lineups) {
@@ -148,12 +138,6 @@ export function normalize(
 ): NormalizedGame {
   const cs: CurrentGameState = relay.currentGameState;
   const awayBatting = relay.homeOrAway === "0";
-  const lookupBatter = awayBatting
-    ? findName(relay.awayLineup.batter, relay.awayEntry.batter)
-    : findName(relay.homeLineup.batter, relay.homeEntry.batter);
-  const lookupPitcher = awayBatting
-    ? findName(relay.homeLineup.pitcher, relay.homeEntry.pitcher)
-    : findName(relay.awayLineup.pitcher, relay.awayEntry.pitcher);
   const findBatter = awayBatting
     ? findPlayer(relay.awayLineup.batter, relay.awayEntry.batter)
     : findPlayer(relay.homeLineup.batter, relay.homeEntry.batter);
@@ -193,8 +177,6 @@ export function normalize(
       second: cs.base2 !== "0" && cs.base2 !== "",
       third: cs.base3 !== "0" && cs.base3 !== "",
     },
-    batterName: lookupBatter(cs.batter),
-    pitcherName: lookupPitcher(cs.pitcher),
     batterStats: buildBatterStats(batterPlayer, relay.pitcherVsBatterCareerStats),
     pitcherStats: buildPitcherStats(pitcherPlayer),
     recentPlays: collectRecentPlays(relay),

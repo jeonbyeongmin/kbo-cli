@@ -19,9 +19,10 @@ function colorTeam(name: string): string {
   return fn ? fn(pc.bold(name)) : pc.bold(name);
 }
 
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+
 function visualWidth(s: string): number {
-  // strip ANSI
-  const stripped = s.replace(/\x1b\[[0-9;]*m/g, "");
+  const stripped = s.replace(ANSI_RE, "");
   let w = 0;
   for (const ch of stripped) {
     const cp = ch.codePointAt(0)!;
@@ -111,14 +112,14 @@ function truncName(name: string): string {
   return acc + "…";
 }
 
-function renderBatterSection(b: BatterStats | null, fallbackName: string): string[] {
+function renderBatterSection(b: BatterStats | null): string[] {
   const lines: string[] = [];
   lines.push(pc.dim("  ─ 타자 ─"));
   if (!b) {
-    lines.push(`  ${fallbackName || pc.dim("?")}`);
+    lines.push(`  ${pc.dim("?")}`);
     return lines;
   }
-  const nameCell = padEnd(truncName(b.name || fallbackName || "?"), NAME_COL);
+  const nameCell = padEnd(truncName(b.name || "?"), NAME_COL);
   const seasonPart = b.seasonAvg
     ? `시즌 AVG ${b.seasonAvg}`
     : pc.dim("시즌 기록 없음");
@@ -133,14 +134,14 @@ function renderBatterSection(b: BatterStats | null, fallbackName: string): strin
   return lines;
 }
 
-function renderPitcherSection(p: PitcherStats | null, fallbackName: string): string[] {
+function renderPitcherSection(p: PitcherStats | null): string[] {
   const lines: string[] = [];
   lines.push(pc.dim("  ─ 투수 ─"));
   if (!p) {
-    lines.push(`  ${fallbackName || pc.dim("?")}`);
+    lines.push(`  ${pc.dim("?")}`);
     return lines;
   }
-  const nameCell = padEnd(truncName(p.name || fallbackName || "?"), NAME_COL);
+  const nameCell = padEnd(truncName(p.name || "?"), NAME_COL);
   const seasonPart = p.seasonEra
     ? `시즌 ERA ${p.seasonEra}`
     : pc.dim("시즌 기록 없음");
@@ -197,9 +198,9 @@ export function renderGame(game: NormalizedGame, opts: { staleSec?: number } = {
 
   // Batter / Pitcher
   if (game.status === "STARTED") {
-    for (const ln of renderBatterSection(game.batterStats, game.batterName)) body.push(ln);
+    for (const ln of renderBatterSection(game.batterStats)) body.push(ln);
     body.push("");
-    for (const ln of renderPitcherSection(game.pitcherStats, game.pitcherName)) body.push(ln);
+    for (const ln of renderPitcherSection(game.pitcherStats)) body.push(ln);
     body.push("");
   }
 

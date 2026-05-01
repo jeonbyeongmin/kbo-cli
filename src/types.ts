@@ -19,6 +19,7 @@ export interface ScheduleGame {
 export interface LineupPlayer {
   name: string;
   pcode: string;
+  // API 가 lineup/entry 응답에서 동일 의미 필드를 다른 케이싱으로 내려줘 둘 다 둔다.
   pos?: string | number | null;
   posName?: string;
   hittype?: string | null;
@@ -134,8 +135,6 @@ export interface NormalizedGame {
   strike: number;
   out: number;
   bases: { first: boolean; second: boolean; third: boolean };
-  batterName: string;
-  pitcherName: string;
   batterStats: BatterStats | null;
   pitcherStats: PitcherStats | null;
   recentPlays: string[];
