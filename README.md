@@ -33,6 +33,9 @@ kbo today --date 2026-05-01
 kbo watch                                # 진행중 경기 라이브
 kbo watch --team LG
 kbo watch --game 20260501NCLG02026 --interval 3
+kbo stats                                # 팀 순위 (←/→ 정렬 전환)
+kbo stats batting                        # 타자 리더보드
+kbo stats pitching                       # 투수 리더보드
 kbo --help
 ```
 
@@ -48,14 +51,14 @@ bun run build                            # → dist/kbo.js
 
 요구사항: Bun ≥ 1.0 (`curl -fsSL https://bun.sh/install | bash`)
 
-## 라이브 중 키
+## 라이브/통계 화면 키
 
-| 키       | 동작                       |
-| -------- | -------------------------- |
-| `q`      | 종료                       |
-| `r`      | 즉시 새로고침              |
-| `←` `→`  | 다른 진행중 경기로 전환    |
-| `Ctrl+C` | 종료                       |
+| 키       | 동작                                                    |
+| -------- | ------------------------------------------------------- |
+| `q`      | 종료                                                    |
+| `r`      | 즉시 새로고침                                           |
+| `←` `→`  | watch: 진행중 경기 전환 · stats: 정렬/카테고리 전환     |
+| `Ctrl+C` | 종료                                                    |
 
 ## 데이터 소스
 
@@ -63,6 +66,9 @@ Naver Sports 비공식 게이트웨이 (`api-gw.sports.naver.com`):
 
 - 일정: `/schedule/games?upperCategoryId=kbaseball&date=YYYY-MM-DD`
 - 라이브: `/schedule/games/{gameId}/relay`
+- 시즌: `/statistics/categories/kbo/seasons`
+- 순위: `/statistics/categories/kbo/seasons/{seasonCode}/teams`
+- 리더보드: `/statistics/categories/kbo/seasons/{seasonCode}/top-players?playerType=HITTER|PITCHER`
 
 비공식이라 무공지 변경 위험이 있다. 응답 구조가 깨지면 `--debug` 와
 `watch --debug --game <id>` 로 raw JSON 을 덤프해 비교한다.
@@ -76,6 +82,7 @@ src/
   types.ts    # 응답/내부 타입
   render.ts   # TUI 레이아웃 (다이아몬드, 스코어, 카운트)
   watch.ts    # 폴링 루프 + alt-screen + 키 입력
+  stats.ts    # 순위/리더보드 인터랙티브 표
 ```
 
 의존성은 `picocolors` 단 하나.

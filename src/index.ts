@@ -1,6 +1,7 @@
 import pc from "picocolors";
 import { fetchRelay, fetchSchedule, todayDate } from "./api.ts";
 import { renderScheduleList } from "./render.ts";
+import { cmdStats } from "./stats.ts";
 import {
   CURRENT_VERSION,
   getUpdateBanner,
@@ -11,13 +12,14 @@ import {
 import { watch } from "./watch.ts";
 
 interface Args {
-  cmd: "today" | "watch" | "update";
+  cmd: "today" | "watch" | "update" | "stats";
   date: string;
   team?: string;
   game?: string;
   intervalSec: number;
   debug: boolean;
   help: boolean;
+  statsView: "standings" | "batting" | "pitching";
 }
 
 function parseArgs(argv: string[]): Args {
@@ -27,6 +29,7 @@ function parseArgs(argv: string[]): Args {
     intervalSec: 5,
     debug: false,
     help: false,
+    statsView: "standings",
   };
   const positional: string[] = [];
   for (let i = 0; i < argv.length; i++) {
@@ -41,7 +44,12 @@ function parseArgs(argv: string[]): Args {
   }
   if (positional[0] === "watch") args.cmd = "watch";
   else if (positional[0] === "update") args.cmd = "update";
-  else if (positional[0] === "today" || positional[0] === undefined) args.cmd = "today";
+  else if (positional[0] === "stats") {
+    args.cmd = "stats";
+    if (positional[1] === "batting") args.statsView = "batting";
+    else if (positional[1] === "pitching") args.statsView = "pitching";
+    else args.statsView = "standings";
+  } else if (positional[0] === "today" || positional[0] === undefined) args.cmd = "today";
   return args;
 }
 
@@ -54,6 +62,9 @@ function printHelp(): void {
   kbo watch                    진행중 경기 라이브 중계 (자동 선택)
   kbo watch --team LG          팀 자동 선택
   kbo watch --game <gameId>    특정 게임 ID
+  kbo stats                    팀 순위 (인터랙티브 정렬)
+  kbo stats batting            타자 리더보드
+  kbo stats pitching           투수 리더보드
   kbo update                   최신 버전으로 업데이트
   kbo --version                현재 버전 출력
 
@@ -66,10 +77,10 @@ function printHelp(): void {
 환경 변수:
   KBO_NO_UPDATE_CHECK=1   백그라운드 업데이트 체크 비활성화
 
-라이브 중 키:
+라이브/통계 화면 키:
   q          종료
   r          즉시 새로고침
-  ←/→        다른 진행중 경기로 전환
+  ←/→        watch: 진행중 경기 전환 · stats: 정렬/카테고리 전환
 `);
 }
 
@@ -152,6 +163,7 @@ async function main(): Promise<void> {
   try {
     if (args.cmd === "today") await cmdToday(args);
     else if (args.cmd === "watch") await cmdWatch(args);
+    else if (args.cmd === "stats") await cmdStats({ view: args.statsView, debug: args.debug });
     else if (args.cmd === "update") await runUpdate();
   } catch (e) {
     console.error(pc.red(`\n에러: ${(e as Error).message}`));
