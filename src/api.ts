@@ -12,7 +12,11 @@ const BASE = "https://api-gw.sports.naver.com";
 const UA = "kbo-cli/0.1 (+https://github.com/jeonbyeongmin/kbo-cli; personal use)";
 
 class HttpError extends Error {
-  constructor(public status: number, public path: string, body: string) {
+  constructor(
+    public status: number,
+    public path: string,
+    body: string
+  ) {
     super(`HTTP ${status} ${path}: ${body.slice(0, 120)}`);
   }
 }
@@ -43,9 +47,7 @@ export async function fetchSchedule(date: string): Promise<ScheduleGame[]> {
 }
 
 export async function fetchRelay(gameId: string): Promise<TextRelayData> {
-  const data = await getJson<{ textRelayData: TextRelayData }>(
-    `/schedule/games/${gameId}/relay`
-  );
+  const data = await getJson<{ textRelayData: TextRelayData }>(`/schedule/games/${gameId}/relay`);
   return data.textRelayData;
 }
 
@@ -71,7 +73,10 @@ function fmtAvg(n: number | undefined | null): string | null {
   return s.startsWith("0.") ? s.slice(1) : s;
 }
 
-function buildBatterStats(p: LineupPlayer | null, vsCareer: string | undefined): BatterStats | null {
+function buildBatterStats(
+  p: LineupPlayer | null,
+  vsCareer: string | undefined
+): BatterStats | null {
   if (!p) return null;
   const seasonAvg = fmtAvg(p.seasonHra);
   const todayAvg = p.pa != null && p.pa > 0 ? fmtAvg(p.todayHra) : null;
@@ -89,17 +94,15 @@ function buildBatterStats(p: LineupPlayer | null, vsCareer: string | undefined):
     seasonAvg,
     todayAvg,
     todayLine,
-    vsPitcher: vsCareer && vsCareer.trim() ? vsCareer.trim() : null,
+    vsPitcher: vsCareer?.trim() ? vsCareer.trim() : null,
   };
 }
 
 function buildPitcherStats(p: LineupPlayer | null): PitcherStats | null {
   if (!p) return null;
-  const seasonEra = p.seasonEra && p.seasonEra.trim() ? p.seasonEra : null;
+  const seasonEra = p.seasonEra?.trim() ? p.seasonEra : null;
   const todayEra =
-    p.todayEra != null && !Number.isNaN(p.todayEra)
-      ? Number(p.todayEra).toFixed(2)
-      : null;
+    p.todayEra != null && !Number.isNaN(p.todayEra) ? Number(p.todayEra).toFixed(2) : null;
   const parts: string[] = [];
   if (p.inn) parts.push(`${p.inn}이닝`);
   if (p.er != null) parts.push(`${p.er}자책`);
@@ -132,10 +135,7 @@ function collectRecentPlays(relay: TextRelayData, max = 6): string[] {
   return out;
 }
 
-export function normalize(
-  schedule: ScheduleGame,
-  relay: TextRelayData
-): NormalizedGame {
+export function normalize(schedule: ScheduleGame, relay: TextRelayData): NormalizedGame {
   const cs: CurrentGameState = relay.currentGameState;
   const awayBatting = relay.homeOrAway === "0";
   const findBatter = awayBatting

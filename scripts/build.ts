@@ -1,5 +1,5 @@
-import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 
 const out = "dist/kbo.js";
 

@@ -27,11 +27,7 @@
   "bin": {
     "kbo": "./dist/kbo.js"
   },
-  "files": [
-    "dist/",
-    "LICENSE",
-    "README.md"
-  ],
+  "files": ["dist/", "LICENSE", "README.md"],
   "scripts": {
     "dev": "bun run src/index.ts",
     "build": "bun run scripts/build.ts",
@@ -54,7 +50,5 @@
   "engines": {
     "node": ">=18"
   },
-  "trustedDependencies": [
-    "@biomejs/biome"
-  ]
+  "trustedDependencies": ["@biomejs/biome"]
 }

@@ -19,6 +19,7 @@ function colorTeam(name: string): string {
   return fn ? fn(pc.bold(name)) : pc.bold(name);
 }
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences require \x1b
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 
 function visualWidth(s: string): number {
@@ -78,10 +79,10 @@ function diamondLines(bases: { first: boolean; second: boolean; third: boolean }
   // 2nd at top, 3rd left, 1st right
   return [
     `       ${r2 ? filled : empty}       `,
-    `     ╱   ╲     `,
+    "     ╱   ╲     ",
     `   ${r3 ? filled : empty}       ${r1 ? filled : empty}   `,
-    `     ╲   ╱     `,
-    `       ⌂       `,
+    "     ╲   ╱     ",
+    "       ⌂       ",
   ];
 }
 
@@ -109,7 +110,7 @@ function truncName(name: string): string {
     if (visualWidth(acc + ch) > NAME_COL - 1) break;
     acc += ch;
   }
-  return acc + "…";
+  return `${acc}…`;
 }
 
 function renderBatterSection(b: BatterStats | null): string[] {
@@ -120,9 +121,7 @@ function renderBatterSection(b: BatterStats | null): string[] {
     return lines;
   }
   const nameCell = padEnd(truncName(b.name || "?"), NAME_COL);
-  const seasonPart = b.seasonAvg
-    ? `시즌 AVG ${b.seasonAvg}`
-    : pc.dim("시즌 기록 없음");
+  const seasonPart = b.seasonAvg ? `시즌 AVG ${b.seasonAvg}` : pc.dim("시즌 기록 없음");
   lines.push(`  ${nameCell}  ${seasonPart}`);
   if (b.todayLine) {
     const tail = b.todayAvg ? `  ${pc.dim(`(AVG ${b.todayAvg})`)}` : "";
@@ -142,9 +141,7 @@ function renderPitcherSection(p: PitcherStats | null): string[] {
     return lines;
   }
   const nameCell = padEnd(truncName(p.name || "?"), NAME_COL);
-  const seasonPart = p.seasonEra
-    ? `시즌 ERA ${p.seasonEra}`
-    : pc.dim("시즌 기록 없음");
+  const seasonPart = p.seasonEra ? `시즌 ERA ${p.seasonEra}` : pc.dim("시즌 기록 없음");
   lines.push(`  ${nameCell}  ${seasonPart}`);
   if (p.todayLine) {
     const tail = p.todayEra ? `  ${pc.dim(`(ERA ${p.todayEra})`)}` : "";
@@ -159,10 +156,10 @@ export function renderGame(game: NormalizedGame, opts: { staleSec?: number } = {
     game.status === "STARTED"
       ? `${inningLabel(game.inning, game.topBottom)} ${game.out}사`
       : game.status === "RESULT"
-      ? "경기 종료"
-      : game.status === "READY"
-      ? "경기 전"
-      : game.status;
+        ? "경기 종료"
+        : game.status === "READY"
+          ? "경기 전"
+          : game.status;
   const staleTag = stale > 5 ? pc.yellow(` ⚠ stale ${stale}s`) : "";
   const title = `KBO LIVE · ${headerStatus}${staleTag}`;
 
@@ -192,7 +189,7 @@ export function renderGame(game: NormalizedGame, opts: { staleSec?: number } = {
   for (let i = 0; i < diamond.length; i++) {
     const left = diamond[i] ?? "";
     const right = countBlock[i] ?? "";
-    body.push(left + "    " + right);
+    body.push(`${left}    ${right}`);
   }
   body.push("");
 
@@ -207,9 +204,9 @@ export function renderGame(game: NormalizedGame, opts: { staleSec?: number } = {
   // Inning line score
   if (game.inningLine.away.length > 0) {
     const innings = game.inningLine.away.length;
-    const headerCells = Array.from({ length: innings }, (_, i) =>
-      String(i + 1).padStart(2)
-    ).join(" ");
+    const headerCells = Array.from({ length: innings }, (_, i) => String(i + 1).padStart(2)).join(
+      " "
+    );
     body.push(`  ${pc.dim("회".padEnd(6))} ${pc.dim(headerCells)}`);
     const awayCells = game.inningLine.away.map((v) => v.padStart(2)).join(" ");
     const homeCells = game.inningLine.home.map((v) => v.padStart(2)).join(" ");
@@ -222,7 +219,7 @@ export function renderGame(game: NormalizedGame, opts: { staleSec?: number } = {
   if (game.recentPlays.length > 0) {
     body.push(pc.dim("  ─ 최근 플레이 ─"));
     for (const p of game.recentPlays.slice(0, 5)) {
-      const trimmed = p.length > W - 6 ? p.slice(0, W - 8) + "…" : p;
+      const trimmed = p.length > W - 6 ? `${p.slice(0, W - 8)}…` : p;
       body.push(`  • ${trimmed}`);
     }
   }
@@ -245,10 +242,10 @@ export function renderScheduleList(games: ScheduleGame[], date: string): string 
       g.statusCode === "STARTED"
         ? pc.green("● LIVE")
         : g.statusCode === "RESULT"
-        ? pc.dim("종료  ")
-        : g.statusCode === "READY"
-        ? pc.cyan("예정  ")
-        : pc.yellow(g.statusInfo || g.statusCode);
+          ? pc.dim("종료  ")
+          : g.statusCode === "READY"
+            ? pc.cyan("예정  ")
+            : pc.yellow(g.statusInfo || g.statusCode);
     const score =
       g.statusCode === "READY"
         ? pc.dim("    ")
@@ -260,6 +257,6 @@ export function renderScheduleList(games: ScheduleGame[], date: string): string 
     );
   }
   lines.push("");
-  lines.push(pc.dim(`  watch:  kbo watch --game <gameId>`));
+  lines.push(pc.dim("  watch:  kbo watch --game <gameId>"));
   return lines.join("\n");
 }
