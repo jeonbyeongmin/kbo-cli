@@ -1,6 +1,7 @@
 # kbo-cli
 
-<img width="523" height="550" alt="스크린샷 2026-05-01 17 26 01" src="https://github.com/user-attachments/assets/42643fbe-46d1-4806-9a03-5938af036767" />
+<img width="1490" height="1187" alt="스크린샷 2026-05-01 18 26 30" src="https://github.com/user-attachments/assets/f7727808-ee89-402f-af22-53618c71f42b" />
+
 
 <br/>
 
