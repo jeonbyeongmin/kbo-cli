@@ -14,8 +14,7 @@ const TEAM_HEX: Record<string, string> = {
   키움: "#570514",
 };
 
-// 칩 스타일: bg 에 팀 hex, fg 는 perceived brightness (BT.601) 로 흑/백 자동 선택.
-// 외부 padding 까지 함께 칠해 visual width 를 보존하고 칩 면적도 적당히 확보.
+// fg 는 BT.601 perceived brightness 로 흑/백 자동 선택해 어떤 팀 hex 에서도 가독성 확보.
 function chip(hex: string): (s: string) => string {
   const r = Number.parseInt(hex.slice(1, 3), 16);
   const g = Number.parseInt(hex.slice(3, 5), 16);
@@ -39,9 +38,8 @@ const TEAM_DISPLAY: Record<string, string> = {
 };
 
 export function colorTeam(name: string): string {
-  const key = name.trim();
-  const display = TEAM_DISPLAY[key] ?? name;
-  const fn = TEAM_COLOR[key];
+  const display = TEAM_DISPLAY[name] ?? name;
+  const fn = TEAM_COLOR[name];
   return fn ? fn(pc.bold(display)) : pc.bold(display);
 }
 
