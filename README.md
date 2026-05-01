@@ -1,5 +1,9 @@
 # kbo-cli
 
+<img width="523" height="550" alt="스크린샷 2026-05-01 17 26 01" src="https://github.com/user-attachments/assets/42643fbe-46d1-4806-9a03-5938af036767" />
+
+<br/>
+
 터미널에서 KBO 경기를 가볍게 관전하는 standalone TUI CLI.
 점수 · 이닝 · 카운트 · 주자 · 최근 플레이를 ANSI 그래픽으로 표시하고
 `watch` 모드에서 한 자리에서 갱신된다.
