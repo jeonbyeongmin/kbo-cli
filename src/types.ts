@@ -19,8 +19,55 @@ export interface ScheduleGame {
 export interface LineupPlayer {
   name: string;
   pcode: string;
-  pos?: string | null;
+  pos?: string | number | null;
+  posName?: string;
   hittype?: string | null;
+  hitType?: string;
+  pitchingStyle?: string | null;
+  backnum?: string;
+  seqno?: number;
+  batOrder?: number;
+  // batter stats (lineup only — entry는 이름/포지션만 보유)
+  ab?: number;
+  hit?: number;
+  bb?: number;
+  hbp?: number;
+  hr?: number;
+  rbi?: number;
+  run?: number;
+  so?: number;
+  pa?: number;
+  seasonHra?: number;
+  todayHra?: number;
+  psHra?: number;
+  vsHra?: string;
+  // pitcher stats
+  kk?: number;
+  er?: number;
+  inn?: string;
+  ballCount?: number;
+  wp?: number;
+  seasonEra?: string;
+  todayEra?: number;
+  vsEra?: string;
+  psEra?: string;
+}
+
+export interface BatterStats {
+  name: string;
+  pcode: string;
+  seasonAvg: string | null;
+  todayAvg: string | null;
+  todayLine: string | null;
+  vsPitcher: string | null;
+}
+
+export interface PitcherStats {
+  name: string;
+  pcode: string;
+  seasonEra: string | null;
+  todayEra: string | null;
+  todayLine: string | null;
 }
 
 export interface CurrentGameState {
@@ -70,6 +117,7 @@ export interface TextRelayData {
   awayLineup: { batter: LineupPlayer[]; pitcher: LineupPlayer[] };
   currentGameState: CurrentGameState;
   textRelays: TextRelay[];
+  pitcherVsBatterCareerStats?: string;
 }
 
 export interface NormalizedGame {
@@ -88,6 +136,8 @@ export interface NormalizedGame {
   bases: { first: boolean; second: boolean; third: boolean };
   batterName: string;
   pitcherName: string;
+  batterStats: BatterStats | null;
+  pitcherStats: PitcherStats | null;
   recentPlays: string[];
   inningLine: { home: string[]; away: string[] };
   status: GameStatus;

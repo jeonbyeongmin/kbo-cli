@@ -1,5 +1,5 @@
 import pc from "picocolors";
-import type { NormalizedGame, ScheduleGame } from "./types.ts";
+import type { BatterStats, NormalizedGame, PitcherStats, ScheduleGame } from "./types.ts";
 
 const TEAM_COLOR: Record<string, (s: string) => string> = {
   LG: pc.red,
@@ -99,6 +99,59 @@ function timeStr(ts: number): string {
   return d.toTimeString().slice(0, 8);
 }
 
+const NAME_COL = 10;
+
+function truncName(name: string): string {
+  if (visualWidth(name) <= NAME_COL) return name;
+  let acc = "";
+  for (const ch of name) {
+    if (visualWidth(acc + ch) > NAME_COL - 1) break;
+    acc += ch;
+  }
+  return acc + "…";
+}
+
+function renderBatterSection(b: BatterStats | null, fallbackName: string): string[] {
+  const lines: string[] = [];
+  lines.push(pc.dim("  ─ 타자 ─"));
+  if (!b) {
+    lines.push(`  ${fallbackName || pc.dim("?")}`);
+    return lines;
+  }
+  const nameCell = padEnd(truncName(b.name || fallbackName || "?"), NAME_COL);
+  const seasonPart = b.seasonAvg
+    ? `시즌 AVG ${b.seasonAvg}`
+    : pc.dim("시즌 기록 없음");
+  lines.push(`  ${nameCell}  ${seasonPart}`);
+  if (b.todayLine) {
+    const tail = b.todayAvg ? `  ${pc.dim(`(AVG ${b.todayAvg})`)}` : "";
+    lines.push(`  ${padEnd(pc.dim("오늘"), NAME_COL)}  ${b.todayLine}${tail}`);
+  }
+  if (b.vsPitcher) {
+    lines.push(`  ${padEnd(pc.dim("vs투수"), NAME_COL)}  ${pc.dim(b.vsPitcher)}`);
+  }
+  return lines;
+}
+
+function renderPitcherSection(p: PitcherStats | null, fallbackName: string): string[] {
+  const lines: string[] = [];
+  lines.push(pc.dim("  ─ 투수 ─"));
+  if (!p) {
+    lines.push(`  ${fallbackName || pc.dim("?")}`);
+    return lines;
+  }
+  const nameCell = padEnd(truncName(p.name || fallbackName || "?"), NAME_COL);
+  const seasonPart = p.seasonEra
+    ? `시즌 ERA ${p.seasonEra}`
+    : pc.dim("시즌 기록 없음");
+  lines.push(`  ${nameCell}  ${seasonPart}`);
+  if (p.todayLine) {
+    const tail = p.todayEra ? `  ${pc.dim(`(ERA ${p.todayEra})`)}` : "";
+    lines.push(`  ${padEnd(pc.dim("오늘"), NAME_COL)}  ${p.todayLine}${tail}`);
+  }
+  return lines;
+}
+
 export function renderGame(game: NormalizedGame, opts: { staleSec?: number } = {}): string {
   const stale = opts.staleSec ?? 0;
   const headerStatus =
@@ -144,8 +197,9 @@ export function renderGame(game: NormalizedGame, opts: { staleSec?: number } = {
 
   // Batter / Pitcher
   if (game.status === "STARTED") {
-    body.push(`  ${pc.dim("타자")}  ${game.batterName || pc.dim("?")}`);
-    body.push(`  ${pc.dim("투수")}  ${game.pitcherName || pc.dim("?")}`);
+    for (const ln of renderBatterSection(game.batterStats, game.batterName)) body.push(ln);
+    body.push("");
+    for (const ln of renderPitcherSection(game.pitcherStats, game.pitcherName)) body.push(ln);
     body.push("");
   }
 
