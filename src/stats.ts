@@ -11,7 +11,7 @@ const HOME = "\x1b[H";
 const CLEAR_AFTER = "\x1b[J";
 const CLEAR_LINE = "\x1b[K";
 
-const INNER = 64;
+const FRAME_WIDTH = 64; // stats 표는 watch 의 56 보다 넓은 폭이 필요
 const LEADERBOARD_LIMIT = 20;
 
 type StatsView = "standings" | "batting" | "pitching";
@@ -182,21 +182,26 @@ function renderStandings(rows: TeamStat[], sortIdx: number, season: string): str
 
   const title = `KBO 순위 · ${season}`;
   const footer = "←/→: 정렬 변경  r: 새로고침  q: 종료";
-  return frame(title, body, footer, INNER).join("\n");
+  return frame(title, body, footer, FRAME_WIDTH).join("\n");
+}
+
+function readMetric(row: PlayerRanking, type: string): number | null | undefined {
+  return (row as unknown as Record<string, number | null | undefined>)[type];
 }
 
 function hitterMetric(row: PlayerRanking, type: string): string {
+  const v = readMetric(row, type);
   switch (type) {
     case "hitterHra":
     case "hitterObp":
     case "hitterSlg":
     case "hitterOps":
     case "hitterIsop":
-      return fmtRate(row[type] as number | null | undefined);
+      return fmtRate(v);
     case "hitterWar":
-      return fmtRate(row[type] as number | null | undefined, 2);
+      return fmtRate(v, 2);
     default:
-      return fmtNum(row[type] as number | null | undefined);
+      return fmtNum(v);
   }
 }
 
@@ -205,13 +210,11 @@ function pitcherMetric(row: PlayerRanking, type: string): string {
     case "pitcherEra":
     case "pitcherWhip":
     case "pitcherWar":
-      return fmtRate(row[type] as number | null | undefined, 2);
-    case "pitcherInning": {
-      const v = row.pitcherInning;
-      return v == null ? "-" : String(v);
-    }
+      return fmtRate(readMetric(row, type), 2);
+    case "pitcherInning":
+      return row.pitcherInning == null ? "-" : String(row.pitcherInning);
     default:
-      return fmtNum(row[type] as number | null | undefined);
+      return fmtNum(readMetric(row, type));
   }
 }
 
@@ -262,7 +265,7 @@ function renderHitterLeaderboard(
 
   const title = `타자 · ${headlineLabel} · ${season}`;
   const footer = "←/→: 카테고리 전환  r: 새로고침  q: 종료";
-  return frame(title, body, footer, INNER).join("\n");
+  return frame(title, body, footer, FRAME_WIDTH).join("\n");
 }
 
 function renderPitcherLeaderboard(
@@ -311,11 +314,11 @@ function renderPitcherLeaderboard(
 
   const title = `투수 · ${headlineLabel} · ${season}`;
   const footer = "←/→: 카테고리 전환  r: 새로고침  q: 종료";
-  return frame(title, body, footer, INNER).join("\n");
+  return frame(title, body, footer, FRAME_WIDTH).join("\n");
 }
 
 export async function cmdStats(args: StatsArgs): Promise<void> {
-  const season = await currentSeasonCode();
+  const season = currentSeasonCode();
 
   if (args.view === "standings") {
     const rows = await fetchStandings(season);
@@ -376,8 +379,6 @@ function renderState(state: TuiState): string {
 }
 
 async function runTui(initial: TuiState): Promise<void> {
-  // 비대화형 환경(파이프·리다이렉트)에선 alt-screen·키 입력이 의미 없으니
-  // 한 프레임만 출력하고 종료한다.
   if (!process.stdin.isTTY) {
     console.log(renderState(initial));
     return;

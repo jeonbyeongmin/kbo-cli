@@ -121,18 +121,6 @@ export interface TextRelayData {
   pitcherVsBatterCareerStats?: string;
 }
 
-export interface Season {
-  category: string;
-  year: number;
-  seasonCode: string;
-  title: string;
-  startDate?: string;
-  endDate?: string;
-  isSeason?: string;
-  isEnable?: string;
-  currentGameType?: string;
-}
-
 export interface TeamStat {
   teamId: string;
   teamName: string;
@@ -220,7 +208,6 @@ export interface PlayerRanking {
   pitcherWhip?: number | null;
   pitcherBb?: number | null;
   pitcherHit?: number | null;
-  [key: string]: unknown;
 }
 
 export interface TopPlayerCategory {

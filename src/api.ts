@@ -5,7 +5,6 @@ import type {
   NormalizedGame,
   PitcherStats,
   ScheduleGame,
-  Season,
   TeamStat,
   TextRelayData,
   TopPlayerCategory,
@@ -62,13 +61,6 @@ export async function fetchGameBasic(gameId: string): Promise<ScheduleGame> {
 // statistics 계열은 categoryId 가 "kbo" — schedule 의 "kbaseball" 과 다르다.
 const STATS_CATEGORY = "kbo";
 
-export async function fetchSeasons(): Promise<Season[]> {
-  const data = await getJson<{ seasons: Season[] }>(
-    `/statistics/categories/${STATS_CATEGORY}/seasons`
-  );
-  return data.seasons ?? [];
-}
-
 export async function fetchStandings(seasonCode: string): Promise<TeamStat[]> {
   const data = await getJson<{ seasonTeamStats: TeamStat[] }>(
     `/statistics/categories/${STATS_CATEGORY}/seasons/${seasonCode}/teams`
@@ -86,19 +78,7 @@ export async function fetchLeaderboards(
   return data.topPlayers ?? [];
 }
 
-export async function currentSeasonCode(): Promise<string> {
-  try {
-    const seasons = await fetchSeasons();
-    if (seasons.length > 0) {
-      const active = seasons.find((s) => s.isSeason === "Y" && s.isEnable === "Y");
-      if (active) return active.seasonCode;
-      const sorted = [...seasons].sort((a, b) => (b.year ?? 0) - (a.year ?? 0));
-      const first = sorted[0];
-      if (first) return first.seasonCode;
-    }
-  } catch {
-    // fallback below
-  }
+export function currentSeasonCode(): string {
   return String(new Date().getFullYear());
 }
 
