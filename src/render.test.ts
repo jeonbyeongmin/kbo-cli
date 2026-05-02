@@ -88,7 +88,7 @@ describe("renderGame STARTED 카운트 위치", () => {
       const sOnlyLines = lines.filter((l) => /^\s*│?\s*S\s+[●○]+\s*$/.test(l));
       expect(sOnlyLines).toHaveLength(0);
     } finally {
-      if (prevCols === undefined) delete process.env.COLUMNS;
+      if (prevCols === undefined) Reflect.deleteProperty(process.env, "COLUMNS");
       else process.env.COLUMNS = prevCols;
     }
   });
