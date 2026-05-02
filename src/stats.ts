@@ -399,7 +399,8 @@ function renderStandings(state: StandingsState): string {
   const sort = view.sorts[state.sortIdx]!;
   const sorted = sort.apply(state.rows);
 
-  const innerWidth = frameWidthFor(state.mode, state.cols);
+  const mode = pickLayoutMode(state.cols, state.layout);
+  const innerWidth = frameWidthFor(mode, state.cols);
   const clip = clipColumns(view.columns, innerWidth - 2, state.colOffset);
 
   const body = renderTable(sorted, clip.visible);
@@ -441,7 +442,8 @@ function renderLeaderboard(state: LeaderboardState): string {
   const window = rows.slice(state.offset, state.offset + LEADERBOARD_WINDOW);
   const useSequentialRank = state.teamCode != null;
 
-  const innerWidth = frameWidthFor(state.mode, state.cols);
+  const mode = pickLayoutMode(state.cols, state.layout);
+  const innerWidth = frameWidthFor(mode, state.cols);
   const cols =
     state.playerType === "HITTER"
       ? hitterColumns(cat.type, activeLabel, useSequentialRank)
@@ -494,7 +496,7 @@ interface StandingsState {
   rows: TeamStat[];
   sortIdx: number;
   viewIdx: number;
-  mode: LayoutMode;
+  layout: LayoutMode | "auto";
   cols: number;
   colOffset: number;
 }
@@ -509,7 +511,7 @@ interface LeaderboardState {
   teams: TeamRef[];
   teamCode: string | null;
   teamRows: PlayerRanking[];
-  mode: LayoutMode;
+  layout: LayoutMode | "auto";
   cols: number;
   colOffset: number;
 }
@@ -527,7 +529,7 @@ function teamsFromStandings(rows: TeamStat[]): TeamRef[] {
 export async function cmdStats(args: StatsArgs): Promise<void> {
   const season = currentSeasonCode();
   const cols = detectColumns();
-  const mode = pickLayoutMode(cols, args.layout);
+  const layout: LayoutMode | "auto" = args.layout ?? "auto";
 
   if (args.view === "standings") {
     const rows = await fetchStandings(season);
@@ -545,7 +547,7 @@ export async function cmdStats(args: StatsArgs): Promise<void> {
       rows,
       sortIdx: 0,
       viewIdx: 0,
-      mode,
+      layout,
       cols,
       colOffset: 0,
     });
@@ -575,7 +577,7 @@ export async function cmdStats(args: StatsArgs): Promise<void> {
     teams: teamsFromStandings(standings),
     teamCode: null,
     teamRows: [],
-    mode,
+    layout,
     cols,
     colOffset: 0,
   });

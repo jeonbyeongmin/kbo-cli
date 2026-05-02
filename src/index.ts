@@ -10,7 +10,13 @@ import {
 import { readCache, writeCache } from "./cache.ts";
 import { cmdConfig, loadConfig } from "./config.ts";
 import { STATUS_RANK, matchesTeam, pickStatusGame, renderOneline } from "./oneline.ts";
-import { type LayoutMode, TEAM_NAMES, colorTeam, renderScheduleList } from "./render.ts";
+import {
+  type LayoutMode,
+  TEAM_NAMES,
+  colorTeam,
+  isLayoutMode,
+  renderScheduleList,
+} from "./render.ts";
 import { cmdStats } from "./stats.ts";
 import type { GameStatus } from "./types.ts";
 import {
@@ -53,7 +59,7 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--interval") args.intervalSec = Math.max(1, Number(argv[++i]) || 5);
     else if (a === "--layout") {
       const v = argv[++i];
-      if (v === "auto" || v === "compact" || v === "normal" || v === "wide") args.layout = v;
+      if (isLayoutMode(v)) args.layout = v;
       else console.error(pc.yellow(`경고: --layout 값 무시 (${v}) — auto/compact/normal/wide`));
     } else if (!a.startsWith("--")) positional.push(a);
   }

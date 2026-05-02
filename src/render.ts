@@ -52,7 +52,8 @@ export function colorTeam(name: string): string {
 }
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences require \x1b
-const ANSI_RE = /\x1b\[[0-9;]*m/g;
+const ANSI_ESC = /\x1b\[[0-9;]*m/;
+const ANSI_RE = new RegExp(ANSI_ESC.source, "g");
 
 export function visualWidth(s: string): number {
   const stripped = s.replace(ANSI_RE, "");
@@ -102,6 +103,10 @@ export const WIDE_THRESHOLD = 120;
 const WIDE_LEFT_INNER = 56;
 const WIDE_GUTTER = 2;
 const WIDE_RIGHT_MIN = 24;
+
+export function isLayoutMode(v: unknown): v is LayoutMode | "auto" {
+  return v === "auto" || v === "compact" || v === "normal" || v === "wide";
+}
 
 export function detectColumns(): number {
   const c = process.stdout.columns;
@@ -239,8 +244,7 @@ function timeStr(ts: number): string {
 
 const NAME_COL = 10;
 
-// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences require \x1b
-const ANSI_TOKEN_RE = /(\x1b\[[0-9;]*m)|([\s\S])/g;
+const ANSI_TOKEN_RE = new RegExp(`(${ANSI_ESC.source})|([\\s\\S])`, "g");
 
 export function trimToWidth(s: string, max: number): string {
   if (visualWidth(s) <= max) return s;

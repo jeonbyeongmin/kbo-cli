@@ -8,6 +8,7 @@ import {
   colorTeam,
   detectColumns,
   frame,
+  isLayoutMode,
   onResize,
   padEnd,
   pickLayoutMode,
@@ -50,12 +51,7 @@ export function loadConfig(): KboConfig {
     cfg.defaultCommand = dc;
   }
   const lo = (raw as { layout?: unknown }).layout;
-  if (
-    typeof lo === "string" &&
-    (lo === "auto" || lo === "compact" || lo === "normal" || lo === "wide")
-  ) {
-    cfg.layout = lo;
-  }
+  if (isLayoutMode(lo)) cfg.layout = lo;
   return cfg;
 }
 
@@ -141,7 +137,11 @@ function renderConfig(
   layoutOverride?: LayoutMode | "auto"
 ): string {
   const cols = detectColumns();
-  const cfgLayout = layoutOverride ?? loadConfig().layout ?? "auto";
+  // layout 항목을 ←/→ 로 바꾸는 즉시 미리보기에 반영되도록 in-memory indices 에서 읽는다.
+  // override 가 있으면 그게 우선 (CLI --layout).
+  const layoutIdx = items.findIndex((it) => it.key === "layout");
+  const liveLayout = layoutIdx >= 0 ? items[layoutIdx]!.values[indices[layoutIdx] ?? 0] : null;
+  const cfgLayout = layoutOverride ?? (isLayoutMode(liveLayout) ? liveLayout : "auto");
   const mode = pickLayoutMode(cols, cfgLayout);
   const innerWidth = configFrameWidth(mode, cols);
   const labelWidth = mode === "compact" ? 10 : 14;
@@ -230,11 +230,7 @@ export async function cmdConfig(layoutOverride?: LayoutMode | "auto"): Promise<v
       ) {
         next.defaultCommand = value;
       }
-      if (
-        item.key === "layout" &&
-        typeof value === "string" &&
-        (value === "auto" || value === "compact" || value === "normal" || value === "wide")
-      ) {
+      if (item.key === "layout" && isLayoutMode(value)) {
         next.layout = value;
       }
     });
