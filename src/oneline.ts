@@ -1,9 +1,9 @@
 import pc from "picocolors";
-import { colorTeam } from "./render.ts";
+import { colorTeam, inningLabel } from "./render.ts";
 import type { GameStatus, NormalizedGame, ScheduleGame } from "./types.ts";
 
-// watch 의 STATUS_RANK 와 동일 — STARTED 우선, 같은 등급 안에서 시작 시간 순.
-const STATUS_RANK: Partial<Record<GameStatus, number>> = {
+// 진행 중 > 시작 전 > 중단 > 종료. CANCEL 은 키에서 제외해 픽 후보에서 자동으로 빠진다.
+export const STATUS_RANK: Partial<Record<GameStatus, number>> = {
   STARTED: 0,
   BEFORE: 1,
   READY: 1,
@@ -11,7 +11,10 @@ const STATUS_RANK: Partial<Record<GameStatus, number>> = {
   RESULT: 3,
 };
 
-function matchesTeam(g: { homeTeamName: string; awayTeamName: string }, name: string): boolean {
+export function matchesTeam(
+  g: { homeTeamName: string; awayTeamName: string },
+  name: string
+): boolean {
   return g.homeTeamName === name || g.awayTeamName === name;
 }
 
@@ -34,10 +37,6 @@ function basesLabel(bases: { first: boolean; second: boolean; third: boolean }):
   if (bases.third) parts.push("3");
   if (parts.length === 0) return "주자 없음";
   return `${parts.join("·")}루`;
-}
-
-function inningLabel(inning: number, topBottom: "top" | "bottom"): string {
-  return `${inning}회${topBottom === "top" ? "초" : "말"}`;
 }
 
 function gameTime(iso: string): string {

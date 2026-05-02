@@ -9,7 +9,7 @@ import {
 } from "./api.ts";
 import { readCache, writeCache } from "./cache.ts";
 import { cmdConfig, loadConfig } from "./config.ts";
-import { pickStatusGame, renderOneline } from "./oneline.ts";
+import { STATUS_RANK, matchesTeam, pickStatusGame, renderOneline } from "./oneline.ts";
 import { TEAM_NAMES, colorTeam, renderScheduleList } from "./render.ts";
 import { cmdStats } from "./stats.ts";
 import type { GameStatus } from "./types.ts";
@@ -108,10 +108,6 @@ status 종료 코드:
 `);
 }
 
-function matchesTeam(g: { homeTeamName: string; awayTeamName: string }, name: string): boolean {
-  return g.homeTeamName === name || g.awayTeamName === name;
-}
-
 async function cmdToday(args: Args): Promise<void> {
   const games = await fetchSchedule(args.date);
   if (args.debug) {
@@ -144,15 +140,6 @@ async function cmdAuto(args: Args): Promise<void> {
     await cmdToday(args);
   }
 }
-
-// watch 박스 회전 순서 — 라이브 > 시작 전 > 중단 > 종료. isPlayable 에서 빠진 status 는 정의하지 않는다.
-const STATUS_RANK: Partial<Record<GameStatus, number>> = {
-  STARTED: 0,
-  BEFORE: 1,
-  READY: 1,
-  SUSPENDED: 2,
-  RESULT: 3,
-};
 
 async function cmdWatch(args: Args): Promise<void> {
   const cfg = loadConfig();
@@ -222,6 +209,8 @@ interface StatusCacheEntry {
 }
 
 const STATUS_CACHE_TTL_MS = 30 * 1000;
+// statusline 호출자가 5초 간격으로 폴링한다 — 5초 default timeout 까지 대기하면 statusline 이 멈춰 보임.
+const STATUS_FETCH_TIMEOUT_MS = 2500;
 
 async function cmdStatus(args: Args): Promise<number> {
   const team = args.team ?? loadConfig().favoriteTeam;
@@ -243,7 +232,7 @@ async function cmdStatus(args: Args): Promise<number> {
     return cached.exitCode;
   }
 
-  const games = await fetchSchedule(args.date);
+  const games = await fetchSchedule(args.date, STATUS_FETCH_TIMEOUT_MS);
   const picked = pickStatusGame(games, team);
 
   if (!picked) {
@@ -253,10 +242,11 @@ async function cmdStatus(args: Args): Promise<number> {
     return 2;
   }
 
-  // STARTED/SUSPENDED 만 라이브 정보 (이닝/카운트/주자/타투수) 가 의미 있어 relay 를 받는다.
-  // BEFORE/READY/RESULT 는 schedule 메타만으로 충분.
+  // BEFORE/READY/RESULT 는 schedule 응답에 점수·시간이 이미 있어 relay 호출 생략.
   const needsRelay = picked.statusCode === "STARTED" || picked.statusCode === "SUSPENDED";
-  const relay = needsRelay ? await fetchRelay(picked.gameId).catch(() => null) : null;
+  const relay = needsRelay
+    ? await fetchRelay(picked.gameId, STATUS_FETCH_TIMEOUT_MS).catch(() => null)
+    : null;
   const normalized = normalize(picked, relay);
 
   const line = renderOneline(normalized, team);
@@ -308,7 +298,7 @@ async function main(): Promise<void> {
     else if (args.cmd === "stats") await cmdStats({ view: args.statsView, debug: args.debug });
     else if (args.cmd === "config") await cmdConfig();
     else if (args.cmd === "update") await runUpdate();
-    else if (args.cmd === "status") process.exit(await cmdStatus(args));
+    else if (args.cmd === "status") process.exitCode = await cmdStatus(args);
   } catch (e) {
     console.error(pc.red(`\n에러: ${(e as Error).message}`));
     process.exit(1);
