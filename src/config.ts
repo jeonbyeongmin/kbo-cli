@@ -6,6 +6,7 @@ import { TEAM_NAMES, colorTeam, frame, padEnd } from "./render.ts";
 
 export interface KboConfig {
   favoriteTeam?: string;
+  interval?: number;
 }
 
 function configDir(): string {
@@ -29,6 +30,10 @@ export function loadConfig(): KboConfig {
   const cfg: KboConfig = {};
   const ft = (raw as { favoriteTeam?: unknown }).favoriteTeam;
   if (typeof ft === "string" && TEAM_NAMES.includes(ft)) cfg.favoriteTeam = ft;
+  const intv = (raw as { interval?: unknown }).interval;
+  if (typeof intv === "number" && Number.isInteger(intv) && intv >= 1 && intv <= 3600) {
+    cfg.interval = intv;
+  }
   return cfg;
 }
 
