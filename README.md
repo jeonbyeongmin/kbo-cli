@@ -28,7 +28,7 @@ kbo watch
 ## 사용
 
 ```bash
-kbo                                      # 오늘 경기 목록 (즐겨찾기 팀 라이브 시 watch 자동)
+kbo                                      # 기본 명령 (kbo config 의 "기본 명령"), 미설정이면 도움말
 kbo today --date 2026-05-01
 kbo watch                                # 진행중 경기 라이브
 kbo watch --team LG
@@ -37,9 +37,15 @@ kbo status --team LG                     # 한 줄 요약 (statusline 용)
 kbo stats                                # 팀 순위 (←/→ 정렬 전환)
 kbo stats batting                        # 타자 리더보드
 kbo stats pitching                       # 투수 리더보드
-kbo config                               # 즐겨찾기 팀 / 폴링 간격 설정 (인터랙티브)
+kbo config                               # 즐겨찾기 팀 / 폴링 간격 / 기본 명령 / 레이아웃 (인터랙티브)
+kbo --layout compact watch --team LG     # 강제 레이아웃 (auto/compact/normal/wide)
 kbo --help
 ```
+
+좁은 터미널 (분할/세로 모드) 에선 자동으로 compact 모드로 다이아몬드와
+카운트가 한 줄로 줄어들고, 넓은 환경에선 좌우 2단 wide 로 타자·투수
+정보와 최근 플레이가 함께 보인다. 임계값은 80 / 120 컬럼이며, `--layout`
+또는 `kbo config` 의 "레이아웃" 항목으로 강제할 수 있다.
 
 ## 개발
 
@@ -61,6 +67,7 @@ bun run build                            # → dist/kbo.js
 | `r`         | 즉시 새로고침                                                                 |
 | `←` `→`     | watch: 진행중 경기 전환 · stats: 정렬/카테고리 전환 · config: 값 변경         |
 | `↑` `↓`     | stats 순위: 뷰(기본/공격/수비) · stats 리더보드: 행 스크롤 · config: 항목 이동 |
+| `h` `l`     | stats: 컬럼 가로 스크롤 (좁은 폭에서 ◂/▸ 표시 시)                              |
 | `t`         | stats 리더보드: 팀 필터 cycling (전체 ↔ 각 팀)                                |
 | `s` `Enter` | config: 저장 후 종료                                                          |
 | `Ctrl+C`    | 종료                                                                          |

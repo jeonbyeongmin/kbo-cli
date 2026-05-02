@@ -10,7 +10,13 @@ import {
 import { readCache, writeCache } from "./cache.ts";
 import { cmdConfig, loadConfig } from "./config.ts";
 import { STATUS_RANK, matchesTeam, pickStatusGame, renderOneline } from "./oneline.ts";
-import { TEAM_NAMES, colorTeam, renderScheduleList } from "./render.ts";
+import {
+  type LayoutMode,
+  TEAM_NAMES,
+  colorTeam,
+  isLayoutMode,
+  renderScheduleList,
+} from "./render.ts";
 import { cmdStats } from "./stats.ts";
 import type { GameStatus } from "./types.ts";
 import {
@@ -31,6 +37,7 @@ interface Args {
   debug: boolean;
   help: boolean;
   statsView: "standings" | "batting" | "pitching";
+  layout?: LayoutMode | "auto";
 }
 
 function parseArgs(argv: string[]): Args {
@@ -50,7 +57,11 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--game") args.game = argv[++i];
     else if (a === "--date") args.date = argv[++i] ?? args.date;
     else if (a === "--interval") args.intervalSec = Math.max(1, Number(argv[++i]) || 5);
-    else if (!a.startsWith("--")) positional.push(a);
+    else if (a === "--layout") {
+      const v = argv[++i];
+      if (isLayoutMode(v)) args.layout = v;
+      else console.error(pc.yellow(`경고: --layout 값 무시 (${v}) — auto/compact/normal/wide`));
+    } else if (!a.startsWith("--")) positional.push(a);
   }
   if (positional[0] === "watch") args.cmd = "watch";
   else if (positional[0] === "update") args.cmd = "update";
@@ -69,7 +80,7 @@ function printHelp(): void {
   console.log(`${pc.bold("kbo")} — KBO 라이브 중계 TUI
 
 사용법:
-  kbo                          오늘 경기 목록 (즐겨찾기 팀 라이브 시 watch 자동)
+  kbo                          기본 명령 실행 (kbo config 의 "기본 명령"), 미설정 시 도움말
   kbo today --date 2026-05-01  특정 날짜 경기 목록
   kbo watch                    진행중 경기 라이브 중계 (자동 선택)
   kbo watch --team LG          팀 자동 선택
@@ -78,13 +89,14 @@ function printHelp(): void {
   kbo stats                    팀 순위 (인터랙티브 정렬)
   kbo stats batting            타자 리더보드
   kbo stats pitching           투수 리더보드
-  kbo config                   즐겨찾기 팀 등 설정 (인터랙티브)
+  kbo config                   즐겨찾기 팀 / 폴링 간격 / 기본 명령 / 레이아웃 (인터랙티브)
   kbo update                   최신 버전으로 업데이트
   kbo --version                현재 버전 출력
 
 옵션:
   --interval <sec>   폴링 주기 (기본 5, config 폴백)
   --date <YYYY-MM-DD>
+  --layout <mode>    auto/compact/normal/wide (기본 auto, config 폴백)
   --debug            raw 응답 dump
   -h, --help
 
@@ -103,6 +115,7 @@ status 종료 코드:
   r          즉시 새로고침
   ←/→        watch: 진행중 경기 전환 · stats: 정렬/카테고리 전환 · config: 값 변경
   ↑/↓        stats 순위: 뷰 토글 · stats 리더보드: 행 스크롤 · config: 항목 이동
+  h/l        stats: 컬럼 가로 스크롤
   t          stats 리더보드: 팀 필터 cycling
   s/Enter    config: 저장 후 종료
 `);
@@ -116,29 +129,6 @@ async function cmdToday(args: Args): Promise<void> {
   }
   const favoriteTeam = loadConfig().favoriteTeam;
   console.log(renderScheduleList(games, args.date, favoriteTeam));
-}
-
-async function cmdAuto(args: Args): Promise<void> {
-  const favoriteTeam = loadConfig().favoriteTeam;
-  if (!favoriteTeam) {
-    await cmdToday(args);
-    return;
-  }
-  const games = await fetchSchedule(args.date);
-  const liveFavorite = games.find((g) => {
-    const live =
-      g.statusCode === "STARTED" ||
-      g.statusCode === "BEFORE" ||
-      g.statusCode === "READY" ||
-      g.statusCode === "SUSPENDED";
-    return live && matchesTeam(g, favoriteTeam);
-  });
-  if (liveFavorite) {
-    console.log(pc.dim(`즐겨찾기 팀 ${favoriteTeam} 라이브 — watch 모드 진입`));
-    await cmdWatch(args);
-  } else {
-    await cmdToday(args);
-  }
 }
 
 async function cmdWatch(args: Args): Promise<void> {
@@ -200,6 +190,7 @@ async function cmdWatch(args: Args): Promise<void> {
     intervalSec: args.intervalSec ?? cfg.interval ?? 5,
     initialGameIndex: initialIndex,
     liveGames: enriched,
+    layout: args.layout ?? cfg.layout,
   });
 }
 
@@ -292,11 +283,16 @@ async function main(): Promise<void> {
   }
 
   try {
-    if (args.cmd === "auto") await cmdAuto(args);
-    else if (args.cmd === "today") await cmdToday(args);
+    if (args.cmd === "auto") {
+      const def = loadConfig().defaultCommand;
+      if (def === "today") await cmdToday(args);
+      else if (def === "watch") await cmdWatch(args);
+      else printHelp();
+    } else if (args.cmd === "today") await cmdToday(args);
     else if (args.cmd === "watch") await cmdWatch(args);
-    else if (args.cmd === "stats") await cmdStats({ view: args.statsView, debug: args.debug });
-    else if (args.cmd === "config") await cmdConfig();
+    else if (args.cmd === "stats")
+      await cmdStats({ view: args.statsView, debug: args.debug, layout: args.layout });
+    else if (args.cmd === "config") await cmdConfig(args.layout);
     else if (args.cmd === "update") await runUpdate();
     else if (args.cmd === "status") process.exitCode = await cmdStatus(args);
   } catch (e) {

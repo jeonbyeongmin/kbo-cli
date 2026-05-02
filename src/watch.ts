@@ -1,5 +1,5 @@
 import { fetchRelay, fetchSchedule, isPlayable, normalize, todayDate } from "./api.ts";
-import { renderGame } from "./render.ts";
+import { type LayoutMode, onResize, renderGame } from "./render.ts";
 import type { NormalizedGame, ScheduleGame } from "./types.ts";
 
 const ENTER_ALT = "\x1b[?1049h";
@@ -7,6 +7,7 @@ const EXIT_ALT = "\x1b[?1049l";
 const HIDE_CURSOR = "\x1b[?25l";
 const SHOW_CURSOR = "\x1b[?25h";
 const HOME = "\x1b[H";
+const CLEAR_SCREEN = "\x1b[2J";
 const CLEAR_AFTER = "\x1b[J";
 const CLEAR_LINE = "\x1b[K";
 
@@ -14,6 +15,7 @@ interface WatchOptions {
   intervalSec: number;
   initialGameIndex: number;
   liveGames: ScheduleGame[];
+  layout?: LayoutMode | "auto";
 }
 
 export async function watch(opts: WatchOptions): Promise<void> {
@@ -27,8 +29,11 @@ export async function watch(opts: WatchOptions): Promise<void> {
   let pollInFlight = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
+  let offResize: (() => void) | null = null;
+
   const cleanup = () => {
     if (timer) clearTimeout(timer);
+    if (offResize) offResize();
     if (process.stdin.isTTY && process.stdin.setRawMode) process.stdin.setRawMode(false);
     process.stdin.pause();
     process.stdout.write(SHOW_CURSOR + EXIT_ALT);
@@ -94,6 +99,7 @@ export async function watch(opts: WatchOptions): Promise<void> {
       body = renderGame(lastGame, {
         staleSec: isLive && stale > staleThreshold ? stale : 0,
         multiGame: liveGames.length > 1,
+        layout: opts.layout,
       });
     } else if (lastError) {
       body = `\n  ${lastError}\n`;
@@ -142,6 +148,15 @@ export async function watch(opts: WatchOptions): Promise<void> {
       // ignore
     }
   };
+
+  // 리사이즈 시 mode 가 바뀌면 줄 수가 늘어 잔상이 남을 수 있어 한 번 전체
+  // 클리어 후 다시 그린다. draw 자체가 detectColumns 를 매번 호출해 cols 를
+  // 자동으로 따라잡으므로 별도 state 보관 불필요.
+  offResize = onResize(() => {
+    if (stopped) return;
+    process.stdout.write(CLEAR_SCREEN);
+    draw();
+  });
 
   draw();
   await poll();

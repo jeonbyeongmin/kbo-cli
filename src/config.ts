@@ -2,11 +2,23 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import pc from "picocolors";
-import { TEAM_NAMES, colorTeam, frame, padEnd } from "./render.ts";
+import {
+  type LayoutMode,
+  TEAM_NAMES,
+  colorTeam,
+  detectColumns,
+  frame,
+  isLayoutMode,
+  onResize,
+  padEnd,
+  pickLayoutMode,
+} from "./render.ts";
 
 export interface KboConfig {
   favoriteTeam?: string;
   interval?: number;
+  defaultCommand?: "today" | "watch";
+  layout?: LayoutMode | "auto";
 }
 
 function configDir(): string {
@@ -34,6 +46,12 @@ export function loadConfig(): KboConfig {
   if (typeof intv === "number" && Number.isInteger(intv) && intv >= 1 && intv <= 3600) {
     cfg.interval = intv;
   }
+  const dc = (raw as { defaultCommand?: unknown }).defaultCommand;
+  if (typeof dc === "string" && (dc === "today" || dc === "watch")) {
+    cfg.defaultCommand = dc;
+  }
+  const lo = (raw as { layout?: unknown }).layout;
+  if (isLayoutMode(lo)) cfg.layout = lo;
   return cfg;
 }
 
@@ -51,9 +69,16 @@ const EXIT_ALT = "\x1b[?1049l";
 const HIDE_CURSOR = "\x1b[?25l";
 const SHOW_CURSOR = "\x1b[?25h";
 const HOME = "\x1b[H";
+const CLEAR_SCREEN = "\x1b[2J";
 const CLEAR_AFTER = "\x1b[J";
 const CLEAR_LINE = "\x1b[K";
-const FRAME_WIDTH = 48;
+
+// config 는 정보가 적어 wide 가 의미 없음 — 항상 normal 폭(48) 을 유지하고
+// compact 환경에서만 화면에 맞춰 살짝 좁힌다.
+function configFrameWidth(mode: LayoutMode, cols: number): number {
+  if (mode === "compact") return Math.max(36, Math.min(48, cols - 4));
+  return 48;
+}
 
 interface ConfigItem {
   key: keyof KboConfig;
@@ -74,6 +99,16 @@ function buildItems(): ConfigItem[] {
       label: "폴링 간격",
       values: [1, 2, 3, 5, 10, 15, 30, null],
     },
+    {
+      key: "defaultCommand",
+      label: "기본 명령",
+      values: ["today", "watch", null],
+    },
+    {
+      key: "layout",
+      label: "레이아웃",
+      values: ["auto", "compact", "normal", "wide", null],
+    },
   ];
 }
 
@@ -82,19 +117,34 @@ function valueIndex(item: ConfigItem, current: string | number | null | undefine
   return idx >= 0 ? idx : item.values.length - 1;
 }
 
-function valueLabel(value: string | number | null): string {
+function valueLabel(value: string | number | null, key?: keyof KboConfig): string {
   if (value == null) return pc.dim("(없음)");
   if (typeof value === "number") return pc.cyan(`${value}초`);
-  return colorTeam(value);
+  if (key === "favoriteTeam") return colorTeam(value);
+  return pc.cyan(value);
 }
 
 function summary(cfg: KboConfig): string {
   return buildItems()
-    .map((it) => `${it.label}: ${valueLabel(cfg[it.key] ?? null)}`)
+    .map((it) => `${it.label}: ${valueLabel(cfg[it.key] ?? null, it.key)}`)
     .join("\n");
 }
 
-function renderConfig(items: ConfigItem[], indices: number[], cursor: number): string {
+function renderConfig(
+  items: ConfigItem[],
+  indices: number[],
+  cursor: number,
+  layoutOverride?: LayoutMode | "auto"
+): string {
+  const cols = detectColumns();
+  // layout 항목을 ←/→ 로 바꾸는 즉시 미리보기에 반영되도록 in-memory indices 에서 읽는다.
+  // override 가 있으면 그게 우선 (CLI --layout).
+  const layoutIdx = items.findIndex((it) => it.key === "layout");
+  const liveLayout = layoutIdx >= 0 ? items[layoutIdx]!.values[indices[layoutIdx] ?? 0] : null;
+  const cfgLayout = layoutOverride ?? (isLayoutMode(liveLayout) ? liveLayout : "auto");
+  const mode = pickLayoutMode(cols, cfgLayout);
+  const innerWidth = configFrameWidth(mode, cols);
+  const labelWidth = mode === "compact" ? 10 : 14;
   const body: string[] = [];
   items.forEach((item, i) => {
     const active = i === cursor;
@@ -102,18 +152,23 @@ function renderConfig(items: ConfigItem[], indices: number[], cursor: number): s
     const labelCol = active ? pc.bold(item.label) : pc.dim(item.label);
     const value = item.values[indices[i] ?? 0] ?? null;
     const valCell = active
-      ? `${pc.cyan("◀")} ${valueLabel(value)} ${pc.cyan("▶")}`
-      : valueLabel(value);
-    body.push(`${prefix}${padEnd(labelCol, 14)}  ${valCell}`);
+      ? `${pc.cyan("◀")} ${valueLabel(value, item.key)} ${pc.cyan("▶")}`
+      : valueLabel(value, item.key);
+    body.push(`${prefix}${padEnd(labelCol, labelWidth)}  ${valCell}`);
   });
   body.push("");
-  body.push(pc.dim("값은 ←/→ 로 변경, s 또는 Enter 로 저장합니다."));
-  return frame("kbo config", body, "↑/↓: 항목  ←/→: 값  s/Enter: 저장  q: 종료", FRAME_WIDTH).join(
+  if (mode === "compact") {
+    body.push(pc.dim("←/→ 값 변경"));
+    body.push(pc.dim("s/Enter 저장"));
+  } else {
+    body.push(pc.dim("값은 ←/→ 로 변경, s 또는 Enter 로 저장합니다."));
+  }
+  return frame("kbo config", body, "↑/↓: 항목  ←/→: 값  s/Enter: 저장  q: 종료", innerWidth).join(
     "\n"
   );
 }
 
-export async function cmdConfig(): Promise<void> {
+export async function cmdConfig(layoutOverride?: LayoutMode | "auto"): Promise<void> {
   const items = buildItems();
   const cfg = loadConfig();
   const indices: number[] = items.map((it) => valueIndex(it, cfg[it.key]));
@@ -125,8 +180,10 @@ export async function cmdConfig(): Promise<void> {
 
   let cursor = 0;
   let stopped = false;
+  let offResize: (() => void) | null = null;
 
   const cleanup = () => {
+    if (offResize) offResize();
     if (process.stdin.isTTY && process.stdin.setRawMode) process.stdin.setRawMode(false);
     process.stdin.pause();
     process.stdout.write(SHOW_CURSOR + EXIT_ALT);
@@ -151,7 +208,7 @@ export async function cmdConfig(): Promise<void> {
 
   const draw = () => {
     if (stopped) return;
-    const out = `${renderConfig(items, indices, cursor)}\n`;
+    const out = `${renderConfig(items, indices, cursor, layoutOverride)}\n`;
     process.stdout.write(HOME);
     for (const line of out.split("\n")) {
       process.stdout.write(`${CLEAR_LINE + line}\n`);
@@ -166,6 +223,16 @@ export async function cmdConfig(): Promise<void> {
       if (value == null) return;
       if (item.key === "favoriteTeam" && typeof value === "string") next.favoriteTeam = value;
       if (item.key === "interval" && typeof value === "number") next.interval = value;
+      if (
+        item.key === "defaultCommand" &&
+        typeof value === "string" &&
+        (value === "today" || value === "watch")
+      ) {
+        next.defaultCommand = value;
+      }
+      if (item.key === "layout" && isLayoutMode(value)) {
+        next.layout = value;
+      }
     });
     try {
       saveConfig(next);
@@ -215,6 +282,12 @@ export async function cmdConfig(): Promise<void> {
       draw();
       return;
     }
+  });
+
+  offResize = onResize(() => {
+    if (stopped) return;
+    process.stdout.write(CLEAR_SCREEN);
+    draw();
   });
 
   draw();
