@@ -33,6 +33,7 @@ kbo today --date 2026-05-01
 kbo watch                                # 진행중 경기 라이브
 kbo watch --team LG
 kbo watch --game 20260501NCLG02026 --interval 3
+kbo status --team LG                     # 한 줄 요약 (statusline 용)
 kbo stats                                # 팀 순위 (←/→ 정렬 전환)
 kbo stats batting                        # 타자 리더보드
 kbo stats pitching                       # 투수 리더보드
@@ -64,6 +65,33 @@ bun run build                            # → dist/kbo.js
 | `s` `Enter` | config: 저장 후 종료                                                          |
 | `Ctrl+C`    | 종료                                                                          |
 
+## statusline 통합
+
+`kbo status` 는 풀 TUI 가 아니라 한 줄 ANSI 출력만 stdout 에 찍고 종료한다.
+tmux/starship/Sketchybar 같은 외부 statusline 에 끼워넣을 수 있다. 응답은
+`~/.cache/kbo-cli/` (또는 `$XDG_CACHE_HOME/kbo-cli/`) 에 30초간 캐시되어,
+호출자가 5초마다 호출해도 실제 API 는 30초당 1회 이하로만 때린다.
+
+```bash
+kbo status --team LG     # 라이브:  LG 4 - 2 NC · 7회말 1사 1·3루 · 타: 오스틴
+kbo status               # --team 생략 시 즐겨찾기 팀 (kbo config)
+```
+
+종료 코드로 호출자가 상태를 분기할 수 있다 — `0` 라이브/시작 전, `2` 오늘
+경기 없음, `3` 종료, `1` 에러.
+
+tmux 예시:
+
+```tmux
+set -g status-right "#(kbo status --team LG)"
+set -g status-interval 5
+```
+
+출력은 항상 풀 정보(점수 · 이닝 · 카운트 · 주자 · 타자/투수)다. 좁은
+statusline 에서는 호출자 측에서 잘라 쓰는 걸 권한다. 팀명은 `kbo config`
+표기와 동일해야 한다 (`LG`, `두산`, `KIA`, `KT`, `삼성`, `한화`, `SSG`,
+`롯데`, `NC`, `키움`).
+
 ## 데이터 소스
 
 Naver Sports 비공식 게이트웨이 (`api-gw.sports.naver.com`):
@@ -87,6 +115,8 @@ src/
   render.ts   # TUI 레이아웃 (다이아몬드, 스코어, 카운트)
   watch.ts    # 폴링 루프 + alt-screen + 키 입력
   stats.ts    # 순위/리더보드 인터랙티브 표
+  oneline.ts  # kbo status 한 줄 렌더 + 게임 픽
+  cache.ts    # XDG 기반 파일 캐시 (status 30s TTL)
 ```
 
 의존성은 `picocolors` 단 하나.

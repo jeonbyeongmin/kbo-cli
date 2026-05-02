@@ -74,6 +74,7 @@ function printHelp(): void {
   kbo watch                    진행중 경기 라이브 중계 (자동 선택)
   kbo watch --team LG          팀 자동 선택
   kbo watch --game <gameId>    특정 게임 ID
+  kbo status [--team LG]       한 줄 요약 (statusline 용, 즉시 종료)
   kbo stats                    팀 순위 (인터랙티브 정렬)
   kbo stats batting            타자 리더보드
   kbo stats pitching           투수 리더보드
@@ -86,6 +87,12 @@ function printHelp(): void {
   --date <YYYY-MM-DD>
   --debug            raw 응답 dump
   -h, --help
+
+status 종료 코드:
+  0   라이브 / 시작 전 한 줄 출력
+  2   오늘 해당 팀 경기 없음
+  3   경기 종료
+  1   에러 (네트워크 / 팀 미지정 / 잘못된 팀 이름)
 
 환경 변수:
   KBO_NO_UPDATE_CHECK=1   백그라운드 업데이트 체크 비활성화
