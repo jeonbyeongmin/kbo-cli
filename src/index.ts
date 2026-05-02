@@ -227,16 +227,12 @@ async function cmdStatus(args: Args): Promise<number> {
   const team = args.team ?? loadConfig().favoriteTeam;
   if (!team) {
     console.error(
-      pc.red(
-        "팀이 지정되지 않았습니다. --team <팀명> 또는 kbo config 로 즐겨찾기 팀을 설정하세요."
-      )
+      pc.red("팀이 지정되지 않았습니다. --team <팀명> 또는 kbo config 로 즐겨찾기 팀을 설정하세요.")
     );
     return 1;
   }
   if (!TEAM_NAMES.includes(team)) {
-    console.error(
-      pc.red(`알 수 없는 팀 이름: ${team} (사용 가능: ${TEAM_NAMES.join(", ")})`)
-    );
+    console.error(pc.red(`알 수 없는 팀 이름: ${team} (사용 가능: ${TEAM_NAMES.join(", ")})`));
     return 1;
   }
 

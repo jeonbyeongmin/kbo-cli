@@ -16,9 +16,7 @@ function matchesTeam(g: { homeTeamName: string; awayTeamName: string }, name: st
 }
 
 export function pickStatusGame(games: ScheduleGame[], team: string): ScheduleGame | null {
-  const filtered = games.filter(
-    (g) => matchesTeam(g, team) && STATUS_RANK[g.statusCode] != null
-  );
+  const filtered = games.filter((g) => matchesTeam(g, team) && STATUS_RANK[g.statusCode] != null);
   filtered.sort((a, b) => {
     const ra = STATUS_RANK[a.statusCode] ?? 99;
     const rb = STATUS_RANK[b.statusCode] ?? 99;
