@@ -273,7 +273,13 @@ function inningLineSection(game: NormalizedGame): string[] {
   ];
 }
 
-function renderStartedBody(game: NormalizedGame): string[] {
+interface RenderCtx {
+  mode: LayoutMode;
+  innerWidth: number;
+  rightInner?: number;
+}
+
+function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): string[] {
   const body: string[] = [""];
   body.push(
     teamScoreLine(
@@ -318,13 +324,13 @@ function renderStartedBody(game: NormalizedGame): string[] {
   if (game.recentPlays.length > 0) {
     body.push(pc.dim("  ─ 최근 플레이 ─"));
     for (const p of game.recentPlays.slice(0, 5)) {
-      body.push(`  • ${trimToWidth(p, W - 4)}`);
+      body.push(`  • ${trimToWidth(p, ctx.innerWidth - 4)}`);
     }
   }
   return body;
 }
 
-function renderResultBody(game: NormalizedGame): string[] {
+function renderResultBody(game: NormalizedGame, ctx: RenderCtx): string[] {
   const body: string[] = [""];
   const awayMark = game.winner === "AWAY" ? pc.yellow("  ★") : "";
   const homeMark = game.winner === "HOME" ? pc.yellow("  ★") : "";
@@ -368,13 +374,13 @@ function renderResultBody(game: NormalizedGame): string[] {
   if (highlights.length > 0) {
     body.push(pc.dim("  ─ 하이라이트 ─"));
     for (const p of highlights.slice(0, 5)) {
-      body.push(`  • ${trimToWidth(p, W - 4)}`);
+      body.push(`  • ${trimToWidth(p, ctx.innerWidth - 4)}`);
     }
   }
   return body;
 }
 
-function renderReadyBody(game: NormalizedGame): string[] {
+function renderReadyBody(game: NormalizedGame, _ctx: RenderCtx): string[] {
   const body: string[] = [""];
   body.push(teamScoreLine(game.awayTeamName, game.awayScore));
   body.push(teamScoreLine(game.homeTeamName, game.homeScore));
@@ -409,7 +415,7 @@ const HEADER_LABEL: Record<GameStatus, (g: NormalizedGame) => string> = {
   SUSPENDED: () => "경기 중단",
 };
 
-const BODY_RENDERERS: Record<GameStatus, (g: NormalizedGame) => string[]> = {
+const BODY_RENDERERS: Record<GameStatus, (g: NormalizedGame, ctx: RenderCtx) => string[]> = {
   STARTED: renderStartedBody,
   RESULT: renderResultBody,
   READY: renderReadyBody,
@@ -420,19 +426,23 @@ const BODY_RENDERERS: Record<GameStatus, (g: NormalizedGame) => string[]> = {
 
 export function renderGame(
   game: NormalizedGame,
-  opts: { staleSec?: number; multiGame?: boolean } = {}
+  opts: { staleSec?: number; multiGame?: boolean; layout?: LayoutMode | "auto" } = {}
 ): string {
   const stale = opts.staleSec ?? 0;
+  const cols = detectColumns();
+  const mode = pickLayoutMode(cols, opts.layout);
+  const innerWidth = frameWidthFor(mode, cols);
   const headerStatus = HEADER_LABEL[game.status](game);
   const venue = game.stadium ? pc.dim(` · ${game.stadium}`) : "";
   const staleTag = stale > 0 ? pc.yellow(` ⚠ stale ${stale}s`) : "";
   const title = `KBO LIVE · ${headerStatus}${venue}${staleTag}`;
 
-  const body = BODY_RENDERERS[game.status](game);
+  const ctx: RenderCtx = { mode, innerWidth };
+  const body = BODY_RENDERERS[game.status](game, ctx);
 
   const switchHint = opts.multiGame ? "  ←/→:경기전환" : "";
   const footer = `q:종료  r:새로고침${switchHint}  · ${timeStr(game.fetchedAt)}`;
-  return frame(title, body, footer).join("\n");
+  return frame(title, body, footer, innerWidth).join("\n");
 }
 
 export function renderScheduleList(
