@@ -166,6 +166,7 @@ export async function cmdConfig(): Promise<void> {
       const value = item.values[indices[i] ?? 0];
       if (value == null) return;
       if (item.key === "favoriteTeam" && typeof value === "string") next.favoriteTeam = value;
+      if (item.key === "interval" && typeof value === "number") next.interval = value;
     });
     try {
       saveConfig(next);
