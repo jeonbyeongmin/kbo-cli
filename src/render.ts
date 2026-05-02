@@ -140,6 +140,19 @@ export function wideColumnWidths(totalInner: number): { left: number; right: num
   return { left: WIDE_LEFT_INNER, right, gutter: WIDE_GUTTER };
 }
 
+// 두 컬럼 string[] 을 줄 단위 zip 해 한 배열로 합친다. 좌측은 leftWidth 로 padEnd
+// 되어 우측 시작 위치가 일정하고, 짧은 컬럼은 빈 줄로 늘여진다.
+function joinColumns(left: string[], right: string[], leftWidth: number, gutter = 2): string[] {
+  const len = Math.max(left.length, right.length);
+  const out: string[] = [];
+  for (let i = 0; i < len; i++) {
+    const l = left[i] ?? "";
+    const r = right[i] ?? "";
+    out.push(`${padEnd(l, leftWidth)}${" ".repeat(gutter)}${r}`);
+  }
+  return out;
+}
+
 export function frame(
   title: string,
   body: string[],
@@ -201,14 +214,28 @@ function timeStr(ts: number): string {
 
 const NAME_COL = 10;
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences require \x1b
+const ANSI_TOKEN_RE = /(\x1b\[[0-9;]*m)|([\s\S])/g;
+
 export function trimToWidth(s: string, max: number): string {
   if (visualWidth(s) <= max) return s;
   let acc = "";
-  for (const ch of s) {
-    if (visualWidth(acc + ch) > max - 1) break;
+  let w = 0;
+  let m: RegExpExecArray | null;
+  ANSI_TOKEN_RE.lastIndex = 0;
+  // biome-ignore lint/suspicious/noAssignInExpressions: regex token loop
+  while ((m = ANSI_TOKEN_RE.exec(s)) !== null) {
+    if (m[1]) {
+      acc += m[1];
+      continue;
+    }
+    const ch = m[2]!;
+    const cw = visualWidth(ch);
+    if (w + cw > max - 1) return `${acc}…`;
     acc += ch;
+    w += cw;
   }
-  return `${acc}…`;
+  return s;
 }
 
 export function truncName(name: string): string {
@@ -305,7 +332,64 @@ interface RenderCtx {
   rightInner?: number;
 }
 
+function renderStartedBodyWide(
+  game: NormalizedGame,
+  ctx: RenderCtx,
+  rightInner: number
+): string[] {
+  const left: string[] = [""];
+  left.push(
+    teamScoreLine(
+      game.awayTeamName,
+      game.awayScore,
+      game.topBottom === "top" ? pc.cyan("  ◀ 공격") : ""
+    )
+  );
+  left.push(
+    teamScoreLine(
+      game.homeTeamName,
+      game.homeScore,
+      game.topBottom === "bottom" ? pc.cyan("  ◀ 공격") : ""
+    )
+  );
+  left.push("");
+  const diamond = diamondLines(game.bases);
+  const countBlock = [
+    "",
+    `  B  ${dots(game.ball, 3, pc.green)}`,
+    `  S  ${dots(game.strike, 2, pc.yellow)}`,
+    `  O  ${dots(game.out, 2, pc.red)}`,
+    "",
+  ];
+  for (let i = 0; i < diamond.length; i++) {
+    left.push(`${diamond[i] ?? ""}    ${countBlock[i] ?? ""}`);
+  }
+  left.push("");
+  const inningLines = inningLineSection(game, { ...ctx, mode: "normal" });
+  for (const ln of inningLines) left.push(ln);
+
+  const right: string[] = [""];
+  for (const ln of renderBatterSection(game.batterStats, false)) {
+    right.push(trimToWidth(ln, rightInner));
+  }
+  right.push("");
+  for (const ln of renderPitcherSection(game.pitcherStats, false)) {
+    right.push(trimToWidth(ln, rightInner));
+  }
+  right.push("");
+  if (game.recentPlays.length > 0) {
+    right.push(pc.dim("  ─ 최근 플레이 ─"));
+    for (const p of game.recentPlays.slice(0, 7)) {
+      right.push(trimToWidth(`  • ${p}`, rightInner));
+    }
+  }
+  return joinColumns(left, right, WIDE_LEFT_INNER);
+}
+
 function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): string[] {
+  if (ctx.mode === "wide" && ctx.rightInner != null) {
+    return renderStartedBodyWide(game, ctx, ctx.rightInner);
+  }
   const compact = ctx.mode === "compact";
   const body: string[] = [""];
   body.push(
@@ -364,7 +448,59 @@ function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): string[] {
   return body;
 }
 
+function renderResultBodyWide(
+  game: NormalizedGame,
+  ctx: RenderCtx,
+  rightInner: number
+): string[] {
+  const left: string[] = [""];
+  const awayMark = game.winner === "AWAY" ? pc.yellow("  ★") : "";
+  const homeMark = game.winner === "HOME" ? pc.yellow("  ★") : "";
+  left.push(teamScoreLine(game.awayTeamName, game.awayScore, awayMark));
+  left.push(teamScoreLine(game.homeTeamName, game.homeScore, homeMark));
+  left.push("");
+  if (game.homeRheb && game.awayRheb) {
+    left.push(pc.dim("  ─ 박스스코어 ─"));
+    const head = ["R", "H", "E", "B"].map((c) => c.padStart(3)).join(" ");
+    left.push(`  ${padEnd("", 6)} ${pc.dim(head)}`);
+    const cells = (r: { r: number; h: number; e: number; b: number }) =>
+      [r.r, r.h, r.e, r.b].map((n) => String(n).padStart(3)).join(" ");
+    left.push(`  ${padEnd(game.awayTeamName, 6)} ${cells(game.awayRheb)}`);
+    left.push(`  ${padEnd(game.homeTeamName, 6)} ${cells(game.homeRheb)}`);
+    left.push("");
+  }
+  const starterMatch =
+    game.awayStarter || game.homeStarter
+      ? `${game.awayStarter ?? "?"}  vs  ${game.homeStarter ?? "?"}`
+      : null;
+  const resultLines = labelValueRows([
+    ["승리투수", game.winPitcher],
+    ["패전투수", game.losePitcher],
+    ["선발", starterMatch],
+  ]);
+  if (resultLines.length > 0) {
+    left.push(pc.dim("  ─ 결과 ─"));
+    for (const ln of resultLines) left.push(ln);
+    left.push("");
+  }
+  const inningLines = inningLineSection(game, { ...ctx, mode: "normal" });
+  for (const ln of inningLines) left.push(ln);
+
+  const right: string[] = [""];
+  const highlights = filterResultHighlights(game.recentPlays);
+  if (highlights.length > 0) {
+    right.push(pc.dim("  ─ 하이라이트 ─"));
+    for (const p of highlights.slice(0, 10)) {
+      right.push(trimToWidth(`  • ${p}`, rightInner));
+    }
+  }
+  return joinColumns(left, right, WIDE_LEFT_INNER);
+}
+
 function renderResultBody(game: NormalizedGame, ctx: RenderCtx): string[] {
+  if (ctx.mode === "wide" && ctx.rightInner != null) {
+    return renderResultBodyWide(game, ctx, ctx.rightInner);
+  }
   const body: string[] = [""];
   const awayMark = game.winner === "AWAY" ? pc.yellow("  ★") : "";
   const homeMark = game.winner === "HOME" ? pc.yellow("  ★") : "";
@@ -415,7 +551,34 @@ function renderResultBody(game: NormalizedGame, ctx: RenderCtx): string[] {
   return body;
 }
 
-function renderReadyBody(game: NormalizedGame, _ctx: RenderCtx): string[] {
+function readyInfoLines(game: NormalizedGame): string[] {
+  return labelValueRows([
+    ["시작", game.gameDateTime ? game.gameDateTime.slice(11, 16) : null],
+    ["구장", game.stadium],
+    ["날씨", game.weather],
+    ["중계", game.broadChannel],
+  ]);
+}
+
+function renderReadyBody(game: NormalizedGame, ctx: RenderCtx): string[] {
+  const infoLines = readyInfoLines(game);
+  // wide 인데 우측 정보가 부족하면 normal 로 격하해 휑함을 피한다.
+  if (ctx.mode === "wide" && ctx.rightInner != null && infoLines.length >= 3) {
+    const left: string[] = [""];
+    left.push(teamScoreLine(game.awayTeamName, game.awayScore));
+    left.push(teamScoreLine(game.homeTeamName, game.homeScore));
+    left.push("");
+    if (game.awayStarter || game.homeStarter) {
+      left.push(pc.dim("  ─ 선발 ─"));
+      left.push(`  ${padEnd(game.awayTeamName, 6)} ${game.awayStarter ?? pc.dim("미정")}`);
+      left.push(`  ${padEnd(game.homeTeamName, 6)} ${game.homeStarter ?? pc.dim("미정")}`);
+    }
+    const right: string[] = [""];
+    right.push(pc.dim("  ─ 경기 정보 ─"));
+    for (const ln of infoLines) right.push(trimToWidth(ln, ctx.rightInner));
+    return joinColumns(left, right, WIDE_LEFT_INNER);
+  }
+
   const body: string[] = [""];
   body.push(teamScoreLine(game.awayTeamName, game.awayScore));
   body.push(teamScoreLine(game.homeTeamName, game.homeScore));
@@ -428,12 +591,6 @@ function renderReadyBody(game: NormalizedGame, _ctx: RenderCtx): string[] {
     body.push("");
   }
 
-  const infoLines = labelValueRows([
-    ["시작", game.gameDateTime ? game.gameDateTime.slice(11, 16) : null],
-    ["구장", game.stadium],
-    ["날씨", game.weather],
-    ["중계", game.broadChannel],
-  ]);
   if (infoLines.length > 0) {
     body.push(pc.dim("  ─ 경기 정보 ─"));
     for (const ln of infoLines) body.push(ln);
@@ -473,6 +630,9 @@ export function renderGame(
   const title = `KBO LIVE · ${headerStatus}${venue}${staleTag}`;
 
   const ctx: RenderCtx = { mode, innerWidth };
+  if (mode === "wide") {
+    ctx.rightInner = wideColumnWidths(innerWidth).right;
+  }
   const body = BODY_RENDERERS[game.status](game, ctx);
 
   const switchHint = opts.multiGame ? "  ←/→:경기전환" : "";
