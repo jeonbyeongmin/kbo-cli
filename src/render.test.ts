@@ -67,9 +67,7 @@ describe("renderGame STARTED 카운트 위치", () => {
     const lines = out.split("\n");
     const diamondIdx = lines.findIndex((l) => l.includes("⌂"));
     expect(diamondIdx).toBeGreaterThan(-1);
-    // 다이아몬드 마지막 줄(⌂) 바로 아래에 카운트 한 줄
-    const countLine = lines[diamondIdx + 1] ?? "";
-    expect(countLine).toMatch(/B .*S .*O /);
+    expect(lines[diamondIdx + 1]).toMatch(/B .*S .*O /);
   });
 
   test("normal — 옛 5줄 countBlock 패턴 (별도 B/S/O 줄) 등장 X", () => {
@@ -79,7 +77,7 @@ describe("renderGame STARTED 카운트 위치", () => {
     expect(bOnlyLines).toHaveLength(0);
   });
 
-  test("wide — 좌측 좌측 컬럼에 카운트 한 줄", () => {
+  test("wide — 좌측 컬럼에 카운트 한 줄", () => {
     const prevCols = process.env.COLUMNS;
     process.env.COLUMNS = "140";
     try {
@@ -96,14 +94,7 @@ describe("renderGame STARTED 카운트 위치", () => {
   });
 
   test("compact — 기존 한 줄 카운트 그대로", () => {
-    const prevCols = process.env.COLUMNS;
-    process.env.COLUMNS = "70";
-    try {
-      const out = strip(renderGame(makeStarted(), { layout: "compact" }));
-      expect(out).toMatch(/B .*S .*O /);
-    } finally {
-      if (prevCols === undefined) delete process.env.COLUMNS;
-      else process.env.COLUMNS = prevCols;
-    }
+    const out = strip(renderGame(makeStarted(), { layout: "compact" }));
+    expect(out).toMatch(/B .*S .*O /);
   });
 });

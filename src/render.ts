@@ -379,7 +379,7 @@ function renderStartedBodyWide(game: NormalizedGame, ctx: RenderCtx, rightInner:
     )
   );
   left.push("");
-  for (const ln of diamondLines(game.bases)) left.push(ln);
+  left.push(...diamondLines(game.bases));
   left.push(`  ${compactCountLine(game.ball, game.strike, game.out)}`);
   left.push("");
   const inningLines = inningLineSection(game, { ...ctx, mode: "normal" });
@@ -430,7 +430,7 @@ function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): string[] {
     body.push(`  ${compactCountLine(game.ball, game.strike, game.out)}`);
     body.push("");
   } else {
-    for (const ln of diamondLines(game.bases)) body.push(ln);
+    body.push(...diamondLines(game.bases));
     body.push(`  ${compactCountLine(game.ball, game.strike, game.out)}`);
     body.push("");
   }
