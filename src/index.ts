@@ -1,7 +1,16 @@
 import pc from "picocolors";
-import { fetchGameBasic, fetchRelay, fetchSchedule, isPlayable, todayDate } from "./api.ts";
+import {
+  fetchGameBasic,
+  fetchRelay,
+  fetchSchedule,
+  isPlayable,
+  normalize,
+  todayDate,
+} from "./api.ts";
+import { readCache, writeCache } from "./cache.ts";
 import { cmdConfig, loadConfig } from "./config.ts";
-import { renderScheduleList } from "./render.ts";
+import { STATUS_RANK, matchesTeam, pickStatusGame, renderOneline } from "./oneline.ts";
+import { TEAM_NAMES, colorTeam, renderScheduleList } from "./render.ts";
 import { cmdStats } from "./stats.ts";
 import type { GameStatus } from "./types.ts";
 import {
@@ -14,7 +23,7 @@ import {
 import { watch } from "./watch.ts";
 
 interface Args {
-  cmd: "auto" | "today" | "watch" | "update" | "stats" | "config";
+  cmd: "auto" | "today" | "watch" | "update" | "stats" | "config" | "status";
   date: string;
   team?: string;
   game?: string;
@@ -46,6 +55,7 @@ function parseArgs(argv: string[]): Args {
   if (positional[0] === "watch") args.cmd = "watch";
   else if (positional[0] === "update") args.cmd = "update";
   else if (positional[0] === "config") args.cmd = "config";
+  else if (positional[0] === "status") args.cmd = "status";
   else if (positional[0] === "stats") {
     args.cmd = "stats";
     if (positional[1] === "batting") args.statsView = "batting";
@@ -64,6 +74,7 @@ function printHelp(): void {
   kbo watch                    진행중 경기 라이브 중계 (자동 선택)
   kbo watch --team LG          팀 자동 선택
   kbo watch --game <gameId>    특정 게임 ID
+  kbo status [--team LG]       한 줄 요약 (statusline 용, 즉시 종료)
   kbo stats                    팀 순위 (인터랙티브 정렬)
   kbo stats batting            타자 리더보드
   kbo stats pitching           투수 리더보드
@@ -77,6 +88,12 @@ function printHelp(): void {
   --debug            raw 응답 dump
   -h, --help
 
+status 종료 코드:
+  0   라이브 / 시작 전 한 줄 출력
+  2   오늘 해당 팀 경기 없음
+  3   경기 종료
+  1   에러 (네트워크 / 팀 미지정 / 잘못된 팀 이름)
+
 환경 변수:
   KBO_NO_UPDATE_CHECK=1   백그라운드 업데이트 체크 비활성화
   KBO_NO_HINT=1           온보딩 힌트 비활성화
@@ -89,10 +106,6 @@ function printHelp(): void {
   t          stats 리더보드: 팀 필터 cycling
   s/Enter    config: 저장 후 종료
 `);
-}
-
-function matchesTeam(g: { homeTeamName: string; awayTeamName: string }, name: string): boolean {
-  return g.homeTeamName === name || g.awayTeamName === name;
 }
 
 async function cmdToday(args: Args): Promise<void> {
@@ -127,15 +140,6 @@ async function cmdAuto(args: Args): Promise<void> {
     await cmdToday(args);
   }
 }
-
-// watch 박스 회전 순서 — 라이브 > 시작 전 > 중단 > 종료. isPlayable 에서 빠진 status 는 정의하지 않는다.
-const STATUS_RANK: Partial<Record<GameStatus, number>> = {
-  STARTED: 0,
-  BEFORE: 1,
-  READY: 1,
-  SUSPENDED: 2,
-  RESULT: 3,
-};
 
 async function cmdWatch(args: Args): Promise<void> {
   const cfg = loadConfig();
@@ -199,6 +203,60 @@ async function cmdWatch(args: Args): Promise<void> {
   });
 }
 
+interface StatusCacheEntry {
+  line: string;
+  exitCode: number;
+}
+
+const STATUS_CACHE_TTL_MS = 30 * 1000;
+// statusline 호출자가 5초 간격으로 폴링한다 — 5초 default timeout 까지 대기하면 statusline 이 멈춰 보임.
+const STATUS_FETCH_TIMEOUT_MS = 2500;
+
+async function cmdStatus(args: Args): Promise<number> {
+  const team = args.team ?? loadConfig().favoriteTeam;
+  if (!team) {
+    console.error(
+      pc.red("팀이 지정되지 않았습니다. --team <팀명> 또는 kbo config 로 즐겨찾기 팀을 설정하세요.")
+    );
+    return 1;
+  }
+  if (!TEAM_NAMES.includes(team)) {
+    console.error(pc.red(`알 수 없는 팀 이름: ${team} (사용 가능: ${TEAM_NAMES.join(", ")})`));
+    return 1;
+  }
+
+  const cacheKey = `${args.date}-${team}`;
+  const cached = readCache<StatusCacheEntry>(cacheKey, STATUS_CACHE_TTL_MS);
+  if (cached) {
+    console.log(cached.line);
+    return cached.exitCode;
+  }
+
+  const games = await fetchSchedule(args.date, STATUS_FETCH_TIMEOUT_MS);
+  const picked = pickStatusGame(games, team);
+
+  if (!picked) {
+    const line = `${colorTeam(team)} · 오늘 경기 없음`;
+    console.log(line);
+    writeCache<StatusCacheEntry>(cacheKey, { line, exitCode: 2 });
+    return 2;
+  }
+
+  // BEFORE/READY/RESULT 는 schedule 응답에 점수·시간이 이미 있어 relay 호출 생략.
+  const needsRelay = picked.statusCode === "STARTED" || picked.statusCode === "SUSPENDED";
+  const relay = needsRelay
+    ? await fetchRelay(picked.gameId, STATUS_FETCH_TIMEOUT_MS).catch(() => null)
+    : null;
+  const normalized = normalize(picked, relay);
+
+  const line = renderOneline(normalized, team);
+  console.log(line);
+
+  const exitCode = picked.statusCode === "RESULT" ? 3 : 0;
+  writeCache<StatusCacheEntry>(cacheKey, { line, exitCode });
+  return exitCode;
+}
+
 function getOnboardingHint(): string | null {
   if (!process.stdout.isTTY) return null;
   if (process.env.KBO_NO_HINT === "1") return null;
@@ -224,7 +282,8 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (args.cmd !== "update") {
+  // status 는 한 줄 출력이 핵심이라 banner/hint/background-check 모두 스킵.
+  if (args.cmd !== "update" && args.cmd !== "status") {
     const banner = getUpdateBanner();
     if (banner) console.log(`${banner}\n`);
     const hint = getOnboardingHint();
@@ -239,6 +298,7 @@ async function main(): Promise<void> {
     else if (args.cmd === "stats") await cmdStats({ view: args.statsView, debug: args.debug });
     else if (args.cmd === "config") await cmdConfig();
     else if (args.cmd === "update") await runUpdate();
+    else if (args.cmd === "status") process.exitCode = await cmdStatus(args);
   } catch (e) {
     console.error(pc.red(`\n에러: ${(e as Error).message}`));
     process.exit(1);

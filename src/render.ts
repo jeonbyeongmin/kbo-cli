@@ -135,7 +135,7 @@ function dots(filled: number, total: number, color: (s: string) => string): stri
   return out.join("");
 }
 
-function inningLabel(inning: number, topBottom: "top" | "bottom"): string {
+export function inningLabel(inning: number, topBottom: "top" | "bottom"): string {
   return `${inning}회${topBottom === "top" ? "초" : "말"}`;
 }
 

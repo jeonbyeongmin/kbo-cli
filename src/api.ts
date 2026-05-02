@@ -55,17 +55,22 @@ async function getJson<T>(path: string, timeoutMs = 5000): Promise<T> {
   }
 }
 
-export async function fetchSchedule(date: string): Promise<ScheduleGame[]> {
+export async function fetchSchedule(date: string, timeoutMs?: number): Promise<ScheduleGame[]> {
   const data = await getJson<{ games: ScheduleGame[] }>(
-    `/schedule/games?upperCategoryId=kbaseball&date=${date}`
+    `/schedule/games?upperCategoryId=kbaseball&date=${date}`,
+    timeoutMs
   );
   return data.games.filter((g) => g.categoryId === "kbo" && g.homeTeamName && g.awayTeamName);
 }
 
 // BEFORE 상태 게임은 textRelayData 가 null 로 내려온다.
-export async function fetchRelay(gameId: string): Promise<TextRelayData | null> {
+export async function fetchRelay(
+  gameId: string,
+  timeoutMs?: number
+): Promise<TextRelayData | null> {
   const data = await getJson<{ textRelayData: TextRelayData | null }>(
-    `/schedule/games/${gameId}/relay`
+    `/schedule/games/${gameId}/relay`,
+    timeoutMs
   );
   return data.textRelayData;
 }
