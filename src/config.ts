@@ -87,6 +87,16 @@ function buildItems(): ConfigItem[] {
       label: "폴링 간격",
       values: [1, 2, 3, 5, 10, 15, 30, null],
     },
+    {
+      key: "defaultCommand",
+      label: "기본 명령",
+      values: ["today", "watch", null],
+    },
+    {
+      key: "layout",
+      label: "레이아웃",
+      values: ["auto", "compact", "normal", "wide", null],
+    },
   ];
 }
 
@@ -95,15 +105,16 @@ function valueIndex(item: ConfigItem, current: string | number | null | undefine
   return idx >= 0 ? idx : item.values.length - 1;
 }
 
-function valueLabel(value: string | number | null): string {
+function valueLabel(value: string | number | null, key?: keyof KboConfig): string {
   if (value == null) return pc.dim("(없음)");
   if (typeof value === "number") return pc.cyan(`${value}초`);
-  return colorTeam(value);
+  if (key === "favoriteTeam") return colorTeam(value);
+  return pc.cyan(value);
 }
 
 function summary(cfg: KboConfig): string {
   return buildItems()
-    .map((it) => `${it.label}: ${valueLabel(cfg[it.key] ?? null)}`)
+    .map((it) => `${it.label}: ${valueLabel(cfg[it.key] ?? null, it.key)}`)
     .join("\n");
 }
 
@@ -115,8 +126,8 @@ function renderConfig(items: ConfigItem[], indices: number[], cursor: number): s
     const labelCol = active ? pc.bold(item.label) : pc.dim(item.label);
     const value = item.values[indices[i] ?? 0] ?? null;
     const valCell = active
-      ? `${pc.cyan("◀")} ${valueLabel(value)} ${pc.cyan("▶")}`
-      : valueLabel(value);
+      ? `${pc.cyan("◀")} ${valueLabel(value, item.key)} ${pc.cyan("▶")}`
+      : valueLabel(value, item.key);
     body.push(`${prefix}${padEnd(labelCol, 14)}  ${valCell}`);
   });
   body.push("");
