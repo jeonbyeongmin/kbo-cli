@@ -74,7 +74,7 @@ function printHelp(): void {
   console.log(`${pc.bold("kbo")} — KBO 라이브 중계 TUI
 
 사용법:
-  kbo                          오늘 경기 목록 (즐겨찾기 팀 라이브 시 watch 자동)
+  kbo                          기본 명령 실행 (kbo config 의 "기본 명령"), 미설정 시 도움말
   kbo today --date 2026-05-01  특정 날짜 경기 목록
   kbo watch                    진행중 경기 라이브 중계 (자동 선택)
   kbo watch --team LG          팀 자동 선택
@@ -83,7 +83,7 @@ function printHelp(): void {
   kbo stats                    팀 순위 (인터랙티브 정렬)
   kbo stats batting            타자 리더보드
   kbo stats pitching           투수 리더보드
-  kbo config                   즐겨찾기 팀 등 설정 (인터랙티브)
+  kbo config                   즐겨찾기 팀 / 폴링 간격 / 기본 명령 / 레이아웃 (인터랙티브)
   kbo update                   최신 버전으로 업데이트
   kbo --version                현재 버전 출력
 
@@ -109,6 +109,7 @@ status 종료 코드:
   r          즉시 새로고침
   ←/→        watch: 진행중 경기 전환 · stats: 정렬/카테고리 전환 · config: 값 변경
   ↑/↓        stats 순위: 뷰 토글 · stats 리더보드: 행 스크롤 · config: 항목 이동
+  h/l        stats: 컬럼 가로 스크롤
   t          stats 리더보드: 팀 필터 cycling
   s/Enter    config: 저장 후 종료
 `);
