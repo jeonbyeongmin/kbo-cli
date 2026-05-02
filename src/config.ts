@@ -2,7 +2,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import pc from "picocolors";
-import { type LayoutMode, TEAM_NAMES, colorTeam, frame, padEnd } from "./render.ts";
+import {
+  type LayoutMode,
+  TEAM_NAMES,
+  colorTeam,
+  detectColumns,
+  frame,
+  padEnd,
+  pickLayoutMode,
+} from "./render.ts";
 
 export interface KboConfig {
   favoriteTeam?: string;
@@ -66,7 +74,13 @@ const SHOW_CURSOR = "\x1b[?25h";
 const HOME = "\x1b[H";
 const CLEAR_AFTER = "\x1b[J";
 const CLEAR_LINE = "\x1b[K";
-const FRAME_WIDTH = 48;
+
+// config 는 정보가 적어 wide 가 의미 없음 — 항상 normal 폭(48) 을 유지하고
+// compact 환경에서만 화면에 맞춰 살짝 좁힌다.
+function configFrameWidth(mode: LayoutMode, cols: number): number {
+  if (mode === "compact") return Math.max(36, Math.min(48, cols - 4));
+  return 48;
+}
 
 interface ConfigItem {
   key: keyof KboConfig;
@@ -118,7 +132,17 @@ function summary(cfg: KboConfig): string {
     .join("\n");
 }
 
-function renderConfig(items: ConfigItem[], indices: number[], cursor: number): string {
+function renderConfig(
+  items: ConfigItem[],
+  indices: number[],
+  cursor: number,
+  layoutOverride?: LayoutMode | "auto"
+): string {
+  const cols = detectColumns();
+  const cfgLayout = layoutOverride ?? loadConfig().layout ?? "auto";
+  const mode = pickLayoutMode(cols, cfgLayout);
+  const innerWidth = configFrameWidth(mode, cols);
+  const labelWidth = mode === "compact" ? 10 : 14;
   const body: string[] = [];
   items.forEach((item, i) => {
     const active = i === cursor;
@@ -128,16 +152,24 @@ function renderConfig(items: ConfigItem[], indices: number[], cursor: number): s
     const valCell = active
       ? `${pc.cyan("◀")} ${valueLabel(value, item.key)} ${pc.cyan("▶")}`
       : valueLabel(value, item.key);
-    body.push(`${prefix}${padEnd(labelCol, 14)}  ${valCell}`);
+    body.push(`${prefix}${padEnd(labelCol, labelWidth)}  ${valCell}`);
   });
   body.push("");
-  body.push(pc.dim("값은 ←/→ 로 변경, s 또는 Enter 로 저장합니다."));
-  return frame("kbo config", body, "↑/↓: 항목  ←/→: 값  s/Enter: 저장  q: 종료", FRAME_WIDTH).join(
-    "\n"
-  );
+  if (mode === "compact") {
+    body.push(pc.dim("←/→ 값 변경"));
+    body.push(pc.dim("s/Enter 저장"));
+  } else {
+    body.push(pc.dim("값은 ←/→ 로 변경, s 또는 Enter 로 저장합니다."));
+  }
+  return frame(
+    "kbo config",
+    body,
+    "↑/↓: 항목  ←/→: 값  s/Enter: 저장  q: 종료",
+    innerWidth
+  ).join("\n");
 }
 
-export async function cmdConfig(): Promise<void> {
+export async function cmdConfig(layoutOverride?: LayoutMode | "auto"): Promise<void> {
   const items = buildItems();
   const cfg = loadConfig();
   const indices: number[] = items.map((it) => valueIndex(it, cfg[it.key]));
@@ -175,7 +207,7 @@ export async function cmdConfig(): Promise<void> {
 
   const draw = () => {
     if (stopped) return;
-    const out = `${renderConfig(items, indices, cursor)}\n`;
+    const out = `${renderConfig(items, indices, cursor, layoutOverride)}\n`;
     process.stdout.write(HOME);
     for (const line of out.split("\n")) {
       process.stdout.write(`${CLEAR_LINE + line}\n`);
