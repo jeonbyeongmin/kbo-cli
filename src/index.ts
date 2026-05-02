@@ -97,7 +97,8 @@ async function cmdToday(args: Args): Promise<void> {
     console.log(JSON.stringify(games, null, 2));
     return;
   }
-  console.log(renderScheduleList(games, args.date));
+  const favoriteTeam = loadConfig().favoriteTeam;
+  console.log(renderScheduleList(games, args.date, favoriteTeam));
 }
 
 // watch 박스 회전 순서 — 라이브 > 시작 전 > 중단 > 종료. isPlayable 에서 빠진 status 는 정의하지 않는다.

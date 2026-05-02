@@ -388,7 +388,11 @@ export function renderGame(
   return frame(title, body, footer).join("\n");
 }
 
-export function renderScheduleList(games: ScheduleGame[], date: string): string {
+export function renderScheduleList(
+  games: ScheduleGame[],
+  date: string,
+  favoriteTeam?: string
+): string {
   const lines: string[] = [];
   lines.push(pc.bold(`KBO ${date}`));
   lines.push("");
@@ -396,7 +400,17 @@ export function renderScheduleList(games: ScheduleGame[], date: string): string 
     lines.push(pc.dim("  경기 없음"));
     return lines.join("\n");
   }
-  for (const g of games) {
+  // 즐겨찾기 팀 경기를 상단으로 끌어올린다 — Array.sort 안정 정렬이라 같은 그룹 내부 순서는 보존.
+  const sorted = favoriteTeam
+    ? [...games].sort((a, b) => {
+        const af = a.homeTeamName === favoriteTeam || a.awayTeamName === favoriteTeam ? 0 : 1;
+        const bf = b.homeTeamName === favoriteTeam || b.awayTeamName === favoriteTeam ? 0 : 1;
+        return af - bf;
+      })
+    : games;
+  for (const g of sorted) {
+    const isFavorite =
+      !!favoriteTeam && (g.homeTeamName === favoriteTeam || g.awayTeamName === favoriteTeam);
     const time = g.gameDateTime.slice(11, 16);
     const isReady = g.statusCode === "READY" || g.statusCode === "BEFORE";
     const status =
@@ -412,7 +426,8 @@ export function renderScheduleList(games: ScheduleGame[], date: string): string 
       : `${String(g.awayTeamScore).padStart(2)} ${pc.dim("-")} ${String(g.homeTeamScore).padEnd(2)}`;
     const away = padStart(colorTeam(g.awayTeamName), 4);
     const home = padEnd(colorTeam(g.homeTeamName), 4);
-    lines.push(`  ${status}  ${time}  ${away}  ${score}  ${home}  ${pc.dim(g.gameId)}`);
+    const prefix = isFavorite ? pc.cyan("▶ ") : "  ";
+    lines.push(`${prefix}${status}  ${time}  ${away}  ${score}  ${home}  ${pc.dim(g.gameId)}`);
   }
   lines.push("");
   lines.push(pc.dim("  watch:  kbo watch --game <gameId>"));
