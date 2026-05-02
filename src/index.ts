@@ -14,7 +14,7 @@ import {
 import { watch } from "./watch.ts";
 
 interface Args {
-  cmd: "today" | "watch" | "update" | "stats" | "config";
+  cmd: "auto" | "today" | "watch" | "update" | "stats" | "config";
   date: string;
   team?: string;
   game?: string;
@@ -26,7 +26,7 @@ interface Args {
 
 function parseArgs(argv: string[]): Args {
   const args: Args = {
-    cmd: "today",
+    cmd: "auto",
     date: todayDate(),
     debug: false,
     help: false,
@@ -51,7 +51,7 @@ function parseArgs(argv: string[]): Args {
     if (positional[1] === "batting") args.statsView = "batting";
     else if (positional[1] === "pitching") args.statsView = "pitching";
     else args.statsView = "standings";
-  } else if (positional[0] === "today" || positional[0] === undefined) args.cmd = "today";
+  } else if (positional[0] === "today") args.cmd = "today";
   return args;
 }
 
@@ -200,7 +200,8 @@ async function main(): Promise<void> {
   }
 
   try {
-    if (args.cmd === "today") await cmdToday(args);
+    if (args.cmd === "auto") await cmdToday(args);
+    else if (args.cmd === "today") await cmdToday(args);
     else if (args.cmd === "watch") await cmdWatch(args);
     else if (args.cmd === "stats") await cmdStats({ view: args.statsView, debug: args.debug });
     else if (args.cmd === "config") await cmdConfig();
