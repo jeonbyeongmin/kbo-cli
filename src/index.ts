@@ -129,6 +129,7 @@ async function cmdWatch(args: Args): Promise<void> {
   });
 
   // explicit gameId wins (even if not in 'live' list — e.g. recent game review)
+  let initialIndex = 0;
   if (args.game) {
     const exact = games.find((g) => g.gameId === args.game);
     if (!exact) {
@@ -136,23 +137,25 @@ async function cmdWatch(args: Args): Promise<void> {
       process.exit(1);
     }
     live = [exact];
+  } else if (args.team) {
+    const filtered = live.filter(
+      (g) => g.homeTeamName === args.team || g.awayTeamName === args.team
+    );
+    if (filtered.length === 0) {
+      console.error(pc.red(`${args.team} 의 경기를 찾지 못했습니다.`));
+      process.exit(1);
+    }
+    live = filtered;
   } else {
-    const explicitTeam = args.team;
-    const fallbackTeam = explicitTeam ? undefined : loadConfig().favoriteTeam;
-    const resolvedTeam = explicitTeam ?? fallbackTeam;
-    if (resolvedTeam) {
-      const filtered = live.filter(
-        (g) => g.homeTeamName === resolvedTeam || g.awayTeamName === resolvedTeam
+    // 폴백 (즐겨찾기 팀): 필터링하지 않고 시작 인덱스만 즐겨찾기 팀 경기로 맞춘다.
+    // ←/→ 로 다른 경기도 그대로 순환할 수 있게.
+    const fallbackTeam = loadConfig().favoriteTeam;
+    if (fallbackTeam) {
+      const idx = live.findIndex(
+        (g) => g.homeTeamName === fallbackTeam || g.awayTeamName === fallbackTeam
       );
-      if (filtered.length > 0) {
-        live = filtered;
-      } else if (explicitTeam) {
-        console.error(pc.red(`${explicitTeam} 의 경기를 찾지 못했습니다.`));
-        process.exit(1);
-      } else {
-        // 폴백이면 전체 live 로 진행하고 안내만.
-        console.log(pc.dim(`즐겨찾기 팀 ${fallbackTeam} 경기 없음 — 전체 표시`));
-      }
+      if (idx >= 0) initialIndex = idx;
+      else console.log(pc.dim(`즐겨찾기 팀 ${fallbackTeam} 경기 없음 — 전체 표시`));
     }
   }
 
@@ -167,7 +170,7 @@ async function cmdWatch(args: Args): Promise<void> {
 
   await watch({
     intervalSec: args.intervalSec,
-    initialGameIndex: 0,
+    initialGameIndex: initialIndex,
     liveGames: enriched,
   });
 }
