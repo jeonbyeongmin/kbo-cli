@@ -6,6 +6,7 @@ import { TEAM_NAMES, colorTeam, frame, padEnd } from "./render.ts";
 
 export interface KboConfig {
   favoriteTeam?: string;
+  interval?: number;
 }
 
 function configDir(): string {
@@ -29,6 +30,10 @@ export function loadConfig(): KboConfig {
   const cfg: KboConfig = {};
   const ft = (raw as { favoriteTeam?: unknown }).favoriteTeam;
   if (typeof ft === "string" && TEAM_NAMES.includes(ft)) cfg.favoriteTeam = ft;
+  const intv = (raw as { interval?: unknown }).interval;
+  if (typeof intv === "number" && Number.isInteger(intv) && intv >= 1 && intv <= 3600) {
+    cfg.interval = intv;
+  }
   return cfg;
 }
 
@@ -54,7 +59,7 @@ interface ConfigItem {
   key: keyof KboConfig;
   label: string;
   // null = "(없음)" — unset 항목.
-  values: (string | null)[];
+  values: (string | number | null)[];
 }
 
 function buildItems(): ConfigItem[] {
@@ -64,22 +69,29 @@ function buildItems(): ConfigItem[] {
       label: "즐겨찾기 팀",
       values: [...TEAM_NAMES, null],
     },
+    {
+      key: "interval",
+      label: "폴링 간격",
+      values: [1, 2, 3, 5, 10, 15, 30, null],
+    },
   ];
 }
 
-function valueIndex(item: ConfigItem, current: string | null | undefined): number {
+function valueIndex(item: ConfigItem, current: string | number | null | undefined): number {
   const idx = item.values.indexOf(current ?? null);
   return idx >= 0 ? idx : item.values.length - 1;
 }
 
-function valueLabel(value: string | null): string {
+function valueLabel(value: string | number | null): string {
   if (value == null) return pc.dim("(없음)");
+  if (typeof value === "number") return pc.cyan(`${value}초`);
   return colorTeam(value);
 }
 
 function summary(cfg: KboConfig): string {
-  const team = cfg.favoriteTeam ? colorTeam(cfg.favoriteTeam) : pc.dim("(없음)");
-  return `즐겨찾기 팀: ${team}`;
+  return buildItems()
+    .map((it) => `${it.label}: ${valueLabel(cfg[it.key] ?? null)}`)
+    .join("\n");
 }
 
 function renderConfig(items: ConfigItem[], indices: number[], cursor: number): string {
@@ -104,7 +116,7 @@ function renderConfig(items: ConfigItem[], indices: number[], cursor: number): s
 export async function cmdConfig(): Promise<void> {
   const items = buildItems();
   const cfg = loadConfig();
-  const indices: number[] = items.map((it) => valueIndex(it, cfg[it.key] as string | undefined));
+  const indices: number[] = items.map((it) => valueIndex(it, cfg[it.key]));
 
   if (!process.stdin.isTTY || !process.stdin.setRawMode) {
     console.log(summary(cfg));
@@ -152,7 +164,8 @@ export async function cmdConfig(): Promise<void> {
     items.forEach((item, i) => {
       const value = item.values[indices[i] ?? 0];
       if (value == null) return;
-      if (item.key === "favoriteTeam") next.favoriteTeam = value;
+      if (item.key === "favoriteTeam" && typeof value === "string") next.favoriteTeam = value;
+      if (item.key === "interval" && typeof value === "number") next.interval = value;
     });
     try {
       saveConfig(next);

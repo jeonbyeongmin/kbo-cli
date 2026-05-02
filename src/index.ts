@@ -18,7 +18,7 @@ interface Args {
   date: string;
   team?: string;
   game?: string;
-  intervalSec: number;
+  intervalSec?: number;
   debug: boolean;
   help: boolean;
   statsView: "standings" | "batting" | "pitching";
@@ -28,7 +28,6 @@ function parseArgs(argv: string[]): Args {
   const args: Args = {
     cmd: "today",
     date: todayDate(),
-    intervalSec: 5,
     debug: false,
     help: false,
     statsView: "standings",
@@ -73,7 +72,7 @@ function printHelp(): void {
   kbo --version                현재 버전 출력
 
 옵션:
-  --interval <sec>   폴링 주기 (기본 5)
+  --interval <sec>   폴링 주기 (기본 5, config 폴백)
   --date <YYYY-MM-DD>
   --debug            raw 응답 dump
   -h, --help
@@ -111,6 +110,7 @@ const STATUS_RANK: Partial<Record<GameStatus, number>> = {
 };
 
 async function cmdWatch(args: Args): Promise<void> {
+  const cfg = loadConfig();
   const games = await fetchSchedule(args.date);
 
   if (args.debug && args.game) {
@@ -149,7 +149,7 @@ async function cmdWatch(args: Args): Promise<void> {
   } else {
     // 폴백 (즐겨찾기 팀): 필터링하지 않고 시작 인덱스만 즐겨찾기 팀 경기로 맞춘다.
     // ←/→ 로 다른 경기도 그대로 순환할 수 있게.
-    const fallbackTeam = loadConfig().favoriteTeam;
+    const fallbackTeam = cfg.favoriteTeam;
     if (fallbackTeam) {
       const idx = live.findIndex(
         (g) => g.homeTeamName === fallbackTeam || g.awayTeamName === fallbackTeam
@@ -169,7 +169,7 @@ async function cmdWatch(args: Args): Promise<void> {
   const enriched = await Promise.all(live.map((g) => fetchGameBasic(g.gameId).catch(() => g)));
 
   await watch({
-    intervalSec: args.intervalSec,
+    intervalSec: args.intervalSec ?? cfg.interval ?? 5,
     initialGameIndex: initialIndex,
     liveGames: enriched,
   });
