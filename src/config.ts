@@ -2,12 +2,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import pc from "picocolors";
-import { TEAM_NAMES, colorTeam, frame, padEnd } from "./render.ts";
+import { type LayoutMode, TEAM_NAMES, colorTeam, frame, padEnd } from "./render.ts";
 
 export interface KboConfig {
   favoriteTeam?: string;
   interval?: number;
   defaultCommand?: "today" | "watch";
+  layout?: LayoutMode | "auto";
 }
 
 function configDir(): string {
@@ -38,6 +39,13 @@ export function loadConfig(): KboConfig {
   const dc = (raw as { defaultCommand?: unknown }).defaultCommand;
   if (typeof dc === "string" && (dc === "today" || dc === "watch")) {
     cfg.defaultCommand = dc;
+  }
+  const lo = (raw as { layout?: unknown }).layout;
+  if (
+    typeof lo === "string" &&
+    (lo === "auto" || lo === "compact" || lo === "normal" || lo === "wide")
+  ) {
+    cfg.layout = lo;
   }
   return cfg;
 }
@@ -177,6 +185,13 @@ export async function cmdConfig(): Promise<void> {
         (value === "today" || value === "watch")
       ) {
         next.defaultCommand = value;
+      }
+      if (
+        item.key === "layout" &&
+        typeof value === "string" &&
+        (value === "auto" || value === "compact" || value === "normal" || value === "wide")
+      ) {
+        next.layout = value;
       }
     });
     try {
