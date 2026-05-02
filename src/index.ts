@@ -79,6 +79,7 @@ function printHelp(): void {
 
 환경 변수:
   KBO_NO_UPDATE_CHECK=1   백그라운드 업데이트 체크 비활성화
+  KBO_NO_HINT=1           온보딩 힌트 비활성화
 
 라이브/통계 화면 키:
   q          종료
