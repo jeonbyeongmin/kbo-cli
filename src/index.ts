@@ -1,7 +1,16 @@
 import pc from "picocolors";
-import { fetchGameBasic, fetchRelay, fetchSchedule, isPlayable, todayDate } from "./api.ts";
+import {
+  fetchGameBasic,
+  fetchRelay,
+  fetchSchedule,
+  isPlayable,
+  normalize,
+  todayDate,
+} from "./api.ts";
+import { readCache, writeCache } from "./cache.ts";
 import { cmdConfig, loadConfig } from "./config.ts";
-import { renderScheduleList } from "./render.ts";
+import { pickStatusGame, renderOneline } from "./oneline.ts";
+import { TEAM_NAMES, colorTeam, renderScheduleList } from "./render.ts";
 import { cmdStats } from "./stats.ts";
 import type { GameStatus } from "./types.ts";
 import {
@@ -14,7 +23,7 @@ import {
 import { watch } from "./watch.ts";
 
 interface Args {
-  cmd: "auto" | "today" | "watch" | "update" | "stats" | "config";
+  cmd: "auto" | "today" | "watch" | "update" | "stats" | "config" | "status";
   date: string;
   team?: string;
   game?: string;
@@ -46,6 +55,7 @@ function parseArgs(argv: string[]): Args {
   if (positional[0] === "watch") args.cmd = "watch";
   else if (positional[0] === "update") args.cmd = "update";
   else if (positional[0] === "config") args.cmd = "config";
+  else if (positional[0] === "status") args.cmd = "status";
   else if (positional[0] === "stats") {
     args.cmd = "stats";
     if (positional[1] === "batting") args.statsView = "batting";
@@ -199,6 +209,61 @@ async function cmdWatch(args: Args): Promise<void> {
   });
 }
 
+interface StatusCacheEntry {
+  line: string;
+  exitCode: number;
+}
+
+const STATUS_CACHE_TTL_MS = 30 * 1000;
+
+async function cmdStatus(args: Args): Promise<number> {
+  const team = args.team ?? loadConfig().favoriteTeam;
+  if (!team) {
+    console.error(
+      pc.red(
+        "팀이 지정되지 않았습니다. --team <팀명> 또는 kbo config 로 즐겨찾기 팀을 설정하세요."
+      )
+    );
+    return 1;
+  }
+  if (!TEAM_NAMES.includes(team)) {
+    console.error(
+      pc.red(`알 수 없는 팀 이름: ${team} (사용 가능: ${TEAM_NAMES.join(", ")})`)
+    );
+    return 1;
+  }
+
+  const cacheKey = `${args.date}-${team}`;
+  const cached = readCache<StatusCacheEntry>(cacheKey, STATUS_CACHE_TTL_MS);
+  if (cached) {
+    console.log(cached.line);
+    return cached.exitCode;
+  }
+
+  const games = await fetchSchedule(args.date);
+  const picked = pickStatusGame(games, team);
+
+  if (!picked) {
+    const line = `${colorTeam(team)} · 오늘 경기 없음`;
+    console.log(line);
+    writeCache<StatusCacheEntry>(cacheKey, { line, exitCode: 2 });
+    return 2;
+  }
+
+  // STARTED/SUSPENDED 만 라이브 정보 (이닝/카운트/주자/타투수) 가 의미 있어 relay 를 받는다.
+  // BEFORE/READY/RESULT 는 schedule 메타만으로 충분.
+  const needsRelay = picked.statusCode === "STARTED" || picked.statusCode === "SUSPENDED";
+  const relay = needsRelay ? await fetchRelay(picked.gameId).catch(() => null) : null;
+  const normalized = normalize(picked, relay);
+
+  const line = renderOneline(normalized, team);
+  console.log(line);
+
+  const exitCode = picked.statusCode === "RESULT" ? 3 : 0;
+  writeCache<StatusCacheEntry>(cacheKey, { line, exitCode });
+  return exitCode;
+}
+
 function getOnboardingHint(): string | null {
   if (!process.stdout.isTTY) return null;
   if (process.env.KBO_NO_HINT === "1") return null;
@@ -224,7 +289,8 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (args.cmd !== "update") {
+  // status 는 한 줄 출력이 핵심이라 banner/hint/background-check 모두 스킵.
+  if (args.cmd !== "update" && args.cmd !== "status") {
     const banner = getUpdateBanner();
     if (banner) console.log(`${banner}\n`);
     const hint = getOnboardingHint();
@@ -239,6 +305,7 @@ async function main(): Promise<void> {
     else if (args.cmd === "stats") await cmdStats({ view: args.statsView, debug: args.debug });
     else if (args.cmd === "config") await cmdConfig();
     else if (args.cmd === "update") await runUpdate();
+    else if (args.cmd === "status") process.exit(await cmdStatus(args));
   } catch (e) {
     console.error(pc.red(`\n에러: ${(e as Error).message}`));
     process.exit(1);
