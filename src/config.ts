@@ -59,7 +59,7 @@ interface ConfigItem {
   key: keyof KboConfig;
   label: string;
   // null = "(없음)" — unset 항목.
-  values: (string | null)[];
+  values: (string | number | null)[];
 }
 
 function buildItems(): ConfigItem[] {
@@ -72,13 +72,14 @@ function buildItems(): ConfigItem[] {
   ];
 }
 
-function valueIndex(item: ConfigItem, current: string | null | undefined): number {
+function valueIndex(item: ConfigItem, current: string | number | null | undefined): number {
   const idx = item.values.indexOf(current ?? null);
   return idx >= 0 ? idx : item.values.length - 1;
 }
 
-function valueLabel(value: string | null): string {
+function valueLabel(value: string | number | null): string {
   if (value == null) return pc.dim("(없음)");
+  if (typeof value === "number") return pc.cyan(`${value}초`);
   return colorTeam(value);
 }
 
@@ -157,7 +158,7 @@ export async function cmdConfig(): Promise<void> {
     items.forEach((item, i) => {
       const value = item.values[indices[i] ?? 0];
       if (value == null) return;
-      if (item.key === "favoriteTeam") next.favoriteTeam = value;
+      if (item.key === "favoriteTeam" && typeof value === "string") next.favoriteTeam = value;
     });
     try {
       saveConfig(next);
