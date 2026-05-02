@@ -1,5 +1,6 @@
 import pc from "picocolors";
 import { fetchGameBasic, fetchRelay, fetchSchedule, isPlayable, todayDate } from "./api.ts";
+import { cmdConfig, loadConfig } from "./config.ts";
 import { renderScheduleList } from "./render.ts";
 import { cmdStats } from "./stats.ts";
 import type { GameStatus } from "./types.ts";
@@ -13,7 +14,7 @@ import {
 import { watch } from "./watch.ts";
 
 interface Args {
-  cmd: "today" | "watch" | "update" | "stats";
+  cmd: "today" | "watch" | "update" | "stats" | "config";
   date: string;
   team?: string;
   game?: string;
@@ -45,6 +46,7 @@ function parseArgs(argv: string[]): Args {
   }
   if (positional[0] === "watch") args.cmd = "watch";
   else if (positional[0] === "update") args.cmd = "update";
+  else if (positional[0] === "config") args.cmd = "config";
   else if (positional[0] === "stats") {
     args.cmd = "stats";
     if (positional[1] === "batting") args.statsView = "batting";
@@ -66,6 +68,7 @@ function printHelp(): void {
   kbo stats                    팀 순위 (인터랙티브 정렬)
   kbo stats batting            타자 리더보드
   kbo stats pitching           투수 리더보드
+  kbo config                   즐겨찾기 팀 등 설정 (인터랙티브)
   kbo update                   최신 버전으로 업데이트
   kbo --version                현재 버전 출력
 
@@ -81,9 +84,10 @@ function printHelp(): void {
 라이브/통계 화면 키:
   q          종료
   r          즉시 새로고침
-  ←/→        watch: 진행중 경기 전환 · stats: 정렬/카테고리 전환
-  ↑/↓        stats 순위: 뷰 토글 · stats 리더보드: 행 스크롤
+  ←/→        watch: 진행중 경기 전환 · stats: 정렬/카테고리 전환 · config: 값 변경
+  ↑/↓        stats 순위: 뷰 토글 · stats 리더보드: 행 스크롤 · config: 항목 이동
   t          stats 리더보드: 팀 필터 cycling
+  s/Enter    config: 저장 후 종료
 `);
 }
 
@@ -93,7 +97,8 @@ async function cmdToday(args: Args): Promise<void> {
     console.log(JSON.stringify(games, null, 2));
     return;
   }
-  console.log(renderScheduleList(games, args.date));
+  const favoriteTeam = loadConfig().favoriteTeam;
+  console.log(renderScheduleList(games, args.date, favoriteTeam));
 }
 
 // watch 박스 회전 순서 — 라이브 > 시작 전 > 중단 > 종료. isPlayable 에서 빠진 status 는 정의하지 않는다.
@@ -124,6 +129,7 @@ async function cmdWatch(args: Args): Promise<void> {
   });
 
   // explicit gameId wins (even if not in 'live' list — e.g. recent game review)
+  let initialIndex = 0;
   if (args.game) {
     const exact = games.find((g) => g.gameId === args.game);
     if (!exact) {
@@ -140,6 +146,17 @@ async function cmdWatch(args: Args): Promise<void> {
       process.exit(1);
     }
     live = filtered;
+  } else {
+    // 폴백 (즐겨찾기 팀): 필터링하지 않고 시작 인덱스만 즐겨찾기 팀 경기로 맞춘다.
+    // ←/→ 로 다른 경기도 그대로 순환할 수 있게.
+    const fallbackTeam = loadConfig().favoriteTeam;
+    if (fallbackTeam) {
+      const idx = live.findIndex(
+        (g) => g.homeTeamName === fallbackTeam || g.awayTeamName === fallbackTeam
+      );
+      if (idx >= 0) initialIndex = idx;
+      else console.log(pc.dim(`즐겨찾기 팀 ${fallbackTeam} 경기 없음 — 전체 표시`));
+    }
   }
 
   if (live.length === 0) {
@@ -153,7 +170,7 @@ async function cmdWatch(args: Args): Promise<void> {
 
   await watch({
     intervalSec: args.intervalSec,
-    initialGameIndex: 0,
+    initialGameIndex: initialIndex,
     liveGames: enriched,
   });
 }
@@ -186,6 +203,7 @@ async function main(): Promise<void> {
     if (args.cmd === "today") await cmdToday(args);
     else if (args.cmd === "watch") await cmdWatch(args);
     else if (args.cmd === "stats") await cmdStats({ view: args.statsView, debug: args.debug });
+    else if (args.cmd === "config") await cmdConfig();
     else if (args.cmd === "update") await runUpdate();
   } catch (e) {
     console.error(pc.red(`\n에러: ${(e as Error).message}`));
