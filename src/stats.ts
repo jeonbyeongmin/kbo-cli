@@ -1,6 +1,16 @@
 import pc from "picocolors";
 import { currentSeasonCode, fetchLeaderboards, fetchPlayers, fetchStandings } from "./api.ts";
-import { colorTeam, frame, padEnd, truncName } from "./render.ts";
+import {
+  type LayoutMode,
+  colorTeam,
+  detectColumns,
+  frame,
+  frameWidthFor,
+  padEnd,
+  pickLayoutMode,
+  truncName,
+  visualWidth,
+} from "./render.ts";
 import type { PlayerRanking, TeamStat, TopPlayerCategory } from "./types.ts";
 
 const ENTER_ALT = "\x1b[?1049h";
@@ -11,7 +21,6 @@ const HOME = "\x1b[H";
 const CLEAR_AFTER = "\x1b[J";
 const CLEAR_LINE = "\x1b[K";
 
-const FRAME_WIDTH = 64;
 const LEADERBOARD_WINDOW = 20;
 
 type StatsView = "standings" | "batting" | "pitching";
@@ -19,12 +28,44 @@ type StatsView = "standings" | "batting" | "pitching";
 interface StatsArgs {
   view: StatsView;
   debug: boolean;
+  layout?: LayoutMode | "auto";
 }
 
 interface Column<T> {
   header: string;
   width: number;
   cell: (row: T, idx: number) => string;
+}
+
+interface ClippedColumns<T> {
+  visible: Column<T>[];
+  leftHidden: number;
+  rightHidden: number;
+}
+
+// 컬럼 누적 폭이 innerWidth 를 넘으면 좌측에서 offset 만큼 빼고, 우측에서
+// fit 까지만 노출한다. 잘린 양 끝은 ◂ / ▸ 인디케이터로 표시 (header/cell 측에서).
+function clipColumns<T>(
+  cols: Column<T>[],
+  innerWidth: number,
+  offset: number
+): ClippedColumns<T> {
+  const max = Math.max(0, Math.min(offset, cols.length));
+  const after = cols.slice(max);
+  const visible: Column<T>[] = [];
+  // " " 좌측 패딩 1 + 컬럼 사이 " " 1.
+  let used = 1;
+  for (const c of after) {
+    const next = used + c.width + (visible.length > 0 ? 1 : 0);
+    if (next > innerWidth) break;
+    visible.push(c);
+    used = next;
+  }
+  return {
+    visible,
+    leftHidden: max,
+    rightHidden: cols.length - max - visible.length,
+  };
 }
 
 function renderTable<T>(rows: T[], cols: Column<T>[], startIdx = 0): string[] {
@@ -35,6 +76,31 @@ function renderTable<T>(rows: T[], cols: Column<T>[], startIdx = 0): string[] {
     lines.push(` ${cols.map((c) => padEnd(c.cell(r, idx), c.width)).join(" ")}`);
   });
   return lines;
+}
+
+function wrapLabels(parts: string[], innerWidth: number): string[] {
+  const out: string[] = [];
+  let line = "";
+  let lineW = 0;
+  for (const p of parts) {
+    const w = visualWidth(p);
+    if (line === "") {
+      line = p;
+      lineW = w;
+      continue;
+    }
+    const candidate = lineW + 1 + w;
+    if (candidate > innerWidth) {
+      out.push(line);
+      line = p;
+      lineW = w;
+    } else {
+      line = `${line} ${p}`;
+      lineW = candidate;
+    }
+  }
+  if (line !== "") out.push(line);
+  return out;
 }
 
 function fmtRate(n: number | null | undefined, decimals = 3): string {
@@ -78,8 +144,8 @@ function highlight(label: string, active: boolean): string {
   return active ? `${pc.cyan("▶")}${pc.bold(label)}${pc.cyan("◀")}` : pc.dim(label);
 }
 
-function joinKeys(labels: string[], activeIdx: number): string {
-  return labels.map((l, i) => highlight(l, i === activeIdx)).join(" ");
+function styledKeyParts(labels: string[], activeIdx: number): string[] {
+  return labels.map((l, i) => highlight(l, i === activeIdx));
 }
 
 interface SortKey<T> {
@@ -311,29 +377,58 @@ function pitcherColumns(
   ];
 }
 
+function pushClipIndicator(body: string[], leftHidden: number, rightHidden: number): void {
+  if (leftHidden === 0 && rightHidden === 0) return;
+  const parts: string[] = [];
+  if (leftHidden > 0) parts.push(pc.dim(`◂ ${leftHidden}컬럼`));
+  if (rightHidden > 0) parts.push(pc.dim(`${rightHidden}컬럼 ▸`));
+  body.push(` ${parts.join("   ")}`);
+}
+
+function pushLabelLine(body: string[], prefix: string, parts: string[], innerWidth: number): void {
+  const indent = " ".repeat(visualWidth(prefix));
+  const wrapped = wrapLabels(parts, Math.max(8, innerWidth - visualWidth(prefix) - 1));
+  if (wrapped.length === 0) {
+    body.push(prefix);
+    return;
+  }
+  body.push(`${prefix} ${wrapped[0]}`);
+  for (const ln of wrapped.slice(1)) body.push(`${indent} ${ln}`);
+}
+
 function renderStandings(state: StandingsState): string {
   const view = STANDINGS_VIEWS[state.viewIdx]!;
   const sort = view.sorts[state.sortIdx]!;
   const sorted = sort.apply(state.rows);
 
-  const body = renderTable(sorted, view.columns);
+  const innerWidth = frameWidthFor(state.mode, state.cols);
+  const clip = clipColumns(view.columns, innerWidth - 2, state.colOffset);
+
+  const body = renderTable(sorted, clip.visible);
+  pushClipIndicator(body, clip.leftHidden, clip.rightHidden);
   body.push("");
-  body.push(
-    `${pc.dim("뷰  :")} ${joinKeys(
+  pushLabelLine(
+    body,
+    pc.dim("뷰  :"),
+    styledKeyParts(
       STANDINGS_VIEWS.map((v) => v.label),
       state.viewIdx
-    )}`
+    ),
+    innerWidth
   );
-  body.push(
-    `${pc.dim("정렬:")} ${joinKeys(
+  pushLabelLine(
+    body,
+    pc.dim("정렬:"),
+    styledKeyParts(
       view.sorts.map((s) => s.label),
       state.sortIdx
-    )}`
+    ),
+    innerWidth
   );
 
   const title = `KBO 순위 · ${view.label} · ${state.season}`;
-  const footer = "←/→: 정렬  ↑/↓: 뷰  r: 새로고침  q: 종료";
-  return frame(title, body, footer, FRAME_WIDTH).join("\n");
+  const footer = "←/→: 정렬  ↑/↓: 뷰  h/l: 가로  r: 새로고침  q: 종료";
+  return frame(title, body, footer, innerWidth).join("\n");
 }
 
 interface TeamRef {
@@ -348,23 +443,34 @@ function renderLeaderboard(state: LeaderboardState): string {
   const window = rows.slice(state.offset, state.offset + LEADERBOARD_WINDOW);
   const useSequentialRank = state.teamCode != null;
 
+  const innerWidth = frameWidthFor(state.mode, state.cols);
   const cols =
     state.playerType === "HITTER"
       ? hitterColumns(cat.type, activeLabel, useSequentialRank)
       : pitcherColumns(cat.type, activeLabel, useSequentialRank);
-  const body = renderTable(window, cols, state.offset);
+  const clip = clipColumns(cols, innerWidth - 2, state.colOffset);
+  const body = renderTable(window, clip.visible, state.offset);
+  pushClipIndicator(body, clip.leftHidden, clip.rightHidden);
 
   body.push("");
-  body.push(
-    `${pc.dim("카테고리:")} ${joinKeys(
+  pushLabelLine(
+    body,
+    pc.dim("카테고리:"),
+    styledKeyParts(
       state.cats.map((c) => categoryLabel(c.type)),
       state.catIdx
-    )}`
+    ),
+    innerWidth
   );
 
   const teamLabels = ["전체", ...state.teams.map((t) => t.name)];
   const teamIdx = state.teamCode ? 1 + state.teams.findIndex((t) => t.code === state.teamCode) : 0;
-  body.push(`${pc.dim("팀  :")} ${joinKeys(teamLabels, Math.max(0, teamIdx))}`);
+  pushLabelLine(
+    body,
+    pc.dim("팀  :"),
+    styledKeyParts(teamLabels, Math.max(0, teamIdx)),
+    innerWidth
+  );
 
   const total = rows.length;
   const from = total === 0 ? 0 : state.offset + 1;
@@ -374,8 +480,8 @@ function renderLeaderboard(state: LeaderboardState): string {
     ? ` · ${state.teams.find((t) => t.code === state.teamCode)?.name ?? state.teamCode}`
     : "";
   const title = `${state.playerType === "HITTER" ? "타자" : "투수"} · ${activeLabel}${teamSuffix} · ${state.season}`;
-  const footer = `${rangeText}  ←/→: 카테고리  ↑/↓: 스크롤  t: 팀  r/q`;
-  return frame(title, body, footer, FRAME_WIDTH).join("\n");
+  const footer = `${rangeText}  ←/→: 카테고리  ↑/↓: 스크롤  h/l: 가로  t: 팀  r/q`;
+  return frame(title, body, footer, innerWidth).join("\n");
 }
 
 function currentLeaderboardRows(state: LeaderboardState): PlayerRanking[] {
@@ -390,6 +496,9 @@ interface StandingsState {
   rows: TeamStat[];
   sortIdx: number;
   viewIdx: number;
+  mode: LayoutMode;
+  cols: number;
+  colOffset: number;
 }
 
 interface LeaderboardState {
@@ -402,6 +511,9 @@ interface LeaderboardState {
   teams: TeamRef[];
   teamCode: string | null;
   teamRows: PlayerRanking[];
+  mode: LayoutMode;
+  cols: number;
+  colOffset: number;
 }
 
 type TuiState = StandingsState | LeaderboardState;
@@ -416,6 +528,8 @@ function teamsFromStandings(rows: TeamStat[]): TeamRef[] {
 
 export async function cmdStats(args: StatsArgs): Promise<void> {
   const season = currentSeasonCode();
+  const cols = detectColumns();
+  const mode = pickLayoutMode(cols, args.layout);
 
   if (args.view === "standings") {
     const rows = await fetchStandings(season);
@@ -433,20 +547,23 @@ export async function cmdStats(args: StatsArgs): Promise<void> {
       rows,
       sortIdx: 0,
       viewIdx: 0,
+      mode,
+      cols,
+      colOffset: 0,
     });
     return;
   }
 
   const playerType = args.view === "batting" ? "HITTER" : "PITCHER";
-  const [standings, cats] = await Promise.all([
+  const [standings, leaderCats] = await Promise.all([
     fetchStandings(season),
     fetchLeaderboards(season, playerType),
   ]);
   if (args.debug) {
-    console.log(JSON.stringify(cats, null, 2));
+    console.log(JSON.stringify(leaderCats, null, 2));
     return;
   }
-  if (cats.length === 0) {
+  if (leaderCats.length === 0) {
     console.log(pc.yellow(`${season} 시즌 ${playerType} 리더보드가 비어 있습니다.`));
     return;
   }
@@ -454,12 +571,15 @@ export async function cmdStats(args: StatsArgs): Promise<void> {
     kind: "leaderboard",
     season,
     playerType,
-    cats,
+    cats: leaderCats,
     catIdx: 0,
     offset: 0,
     teams: teamsFromStandings(standings),
     teamCode: null,
     teamRows: [],
+    mode,
+    cols,
+    colOffset: 0,
   });
 }
 
@@ -630,6 +750,16 @@ async function runTui(initial: TuiState): Promise<void> {
       }
       if (data === "t" || data === "T") {
         void cycleTeam();
+        return;
+      }
+      if (data === "h" || data === "H") {
+        state = { ...state, colOffset: Math.max(0, state.colOffset - 1) };
+        draw();
+        return;
+      }
+      if (data === "l" || data === "L") {
+        state = { ...state, colOffset: state.colOffset + 1 };
+        draw();
         return;
       }
       if (data === "\x1b[C") {

@@ -282,7 +282,8 @@ async function main(): Promise<void> {
       else printHelp();
     } else if (args.cmd === "today") await cmdToday(args);
     else if (args.cmd === "watch") await cmdWatch(args);
-    else if (args.cmd === "stats") await cmdStats({ view: args.statsView, debug: args.debug });
+    else if (args.cmd === "stats")
+      await cmdStats({ view: args.statsView, debug: args.debug, layout: args.layout });
     else if (args.cmd === "config") await cmdConfig();
     else if (args.cmd === "update") await runUpdate();
     else if (args.cmd === "status") process.exitCode = await cmdStatus(args);
