@@ -100,6 +100,29 @@ async function cmdToday(args: Args): Promise<void> {
   console.log(renderScheduleList(games, args.date, favoriteTeam));
 }
 
+async function cmdAuto(args: Args): Promise<void> {
+  const favoriteTeam = loadConfig().favoriteTeam;
+  if (!favoriteTeam) {
+    await cmdToday(args);
+    return;
+  }
+  const games = await fetchSchedule(args.date);
+  const liveFavorite = games.find((g) => {
+    const live =
+      g.statusCode === "STARTED" ||
+      g.statusCode === "BEFORE" ||
+      g.statusCode === "READY" ||
+      g.statusCode === "SUSPENDED";
+    return live && (g.homeTeamName === favoriteTeam || g.awayTeamName === favoriteTeam);
+  });
+  if (liveFavorite) {
+    console.log(pc.dim(`즐겨찾기 팀 ${favoriteTeam} 라이브 — watch 모드 진입`));
+    await cmdWatch(args);
+  } else {
+    await cmdToday(args);
+  }
+}
+
 // watch 박스 회전 순서 — 라이브 > 시작 전 > 중단 > 종료. isPlayable 에서 빠진 status 는 정의하지 않는다.
 const STATUS_RANK: Partial<Record<GameStatus, number>> = {
   STARTED: 0,
@@ -200,7 +223,7 @@ async function main(): Promise<void> {
   }
 
   try {
-    if (args.cmd === "auto") await cmdToday(args);
+    if (args.cmd === "auto") await cmdAuto(args);
     else if (args.cmd === "today") await cmdToday(args);
     else if (args.cmd === "watch") await cmdWatch(args);
     else if (args.cmd === "stats") await cmdStats({ view: args.statsView, debug: args.debug });
