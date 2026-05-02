@@ -144,15 +144,14 @@ async function cmdWatch(args: Args): Promise<void> {
       const filtered = live.filter(
         (g) => g.homeTeamName === resolvedTeam || g.awayTeamName === resolvedTeam
       );
-      if (filtered.length === 0) {
-        // 명시 --team 은 그대로 에러 종료, 폴백이면 전체 live 로 진행하고 안내만.
-        if (explicitTeam) {
-          console.error(pc.red(`${explicitTeam} 의 경기를 찾지 못했습니다.`));
-          process.exit(1);
-        }
-        console.log(pc.dim(`즐겨찾기 팀 ${fallbackTeam} 경기 없음 — 전체 표시`));
-      } else {
+      if (filtered.length > 0) {
         live = filtered;
+      } else if (explicitTeam) {
+        console.error(pc.red(`${explicitTeam} 의 경기를 찾지 못했습니다.`));
+        process.exit(1);
+      } else {
+        // 폴백이면 전체 live 로 진행하고 안내만.
+        console.log(pc.dim(`즐겨찾기 팀 ${fallbackTeam} 경기 없음 — 전체 표시`));
       }
     }
   }

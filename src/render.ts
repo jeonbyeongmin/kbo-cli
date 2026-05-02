@@ -20,6 +20,8 @@ const TEAM_HEX: Record<string, string> = {
   키움: "#570514",
 };
 
+export const TEAM_NAMES: readonly string[] = Object.keys(TEAM_HEX);
+
 // fg 는 BT.601 perceived brightness 로 흑/백 자동 선택해 어떤 팀 hex 에서도 가독성 확보.
 function chip(hex: string): (s: string) => string {
   const r = Number.parseInt(hex.slice(1, 3), 16);

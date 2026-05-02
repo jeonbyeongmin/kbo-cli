@@ -2,21 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import pc from "picocolors";
-import { colorTeam, frame, padEnd } from "./render.ts";
-
-// render.ts 의 TEAM_HEX 키와 순서를 동기화한다 — KBO 팀 변경 시 양쪽 갱신.
-export const KNOWN_TEAMS: readonly string[] = [
-  "LG",
-  "두산",
-  "KIA",
-  "KT",
-  "삼성",
-  "한화",
-  "SSG",
-  "롯데",
-  "NC",
-  "키움",
-] as const;
+import { TEAM_NAMES, colorTeam, frame, padEnd } from "./render.ts";
 
 export interface KboConfig {
   favoriteTeam?: string;
@@ -42,7 +28,7 @@ export function loadConfig(): KboConfig {
   if (!raw || typeof raw !== "object") return {};
   const cfg: KboConfig = {};
   const ft = (raw as { favoriteTeam?: unknown }).favoriteTeam;
-  if (typeof ft === "string" && KNOWN_TEAMS.includes(ft)) cfg.favoriteTeam = ft;
+  if (typeof ft === "string" && TEAM_NAMES.includes(ft)) cfg.favoriteTeam = ft;
   return cfg;
 }
 
@@ -76,7 +62,7 @@ function buildItems(): ConfigItem[] {
     {
       key: "favoriteTeam",
       label: "즐겨찾기 팀",
-      values: [...KNOWN_TEAMS, null],
+      values: [...TEAM_NAMES, null],
     },
   ];
 }
@@ -165,7 +151,8 @@ export async function cmdConfig(): Promise<void> {
     const next: KboConfig = {};
     items.forEach((item, i) => {
       const value = item.values[indices[i] ?? 0];
-      if (value != null) (next as Record<string, string>)[item.key] = value;
+      if (value == null) return;
+      if (item.key === "favoriteTeam") next.favoriteTeam = value;
     });
     try {
       saveConfig(next);
@@ -190,12 +177,16 @@ export async function cmdConfig(): Promise<void> {
       return;
     }
     if (data === "\x1b[A") {
-      cursor = (cursor - 1 + items.length) % items.length;
+      const next = (cursor - 1 + items.length) % items.length;
+      if (next === cursor) return;
+      cursor = next;
       draw();
       return;
     }
     if (data === "\x1b[B") {
-      cursor = (cursor + 1) % items.length;
+      const next = (cursor + 1) % items.length;
+      if (next === cursor) return;
+      cursor = next;
       draw();
       return;
     }
