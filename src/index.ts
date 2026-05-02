@@ -124,29 +124,6 @@ async function cmdToday(args: Args): Promise<void> {
   console.log(renderScheduleList(games, args.date, favoriteTeam));
 }
 
-async function cmdAuto(args: Args): Promise<void> {
-  const favoriteTeam = loadConfig().favoriteTeam;
-  if (!favoriteTeam) {
-    await cmdToday(args);
-    return;
-  }
-  const games = await fetchSchedule(args.date);
-  const liveFavorite = games.find((g) => {
-    const live =
-      g.statusCode === "STARTED" ||
-      g.statusCode === "BEFORE" ||
-      g.statusCode === "READY" ||
-      g.statusCode === "SUSPENDED";
-    return live && matchesTeam(g, favoriteTeam);
-  });
-  if (liveFavorite) {
-    console.log(pc.dim(`즐겨찾기 팀 ${favoriteTeam} 라이브 — watch 모드 진입`));
-    await cmdWatch(args);
-  } else {
-    await cmdToday(args);
-  }
-}
-
 async function cmdWatch(args: Args): Promise<void> {
   const cfg = loadConfig();
   const games = await fetchSchedule(args.date);
@@ -298,8 +275,12 @@ async function main(): Promise<void> {
   }
 
   try {
-    if (args.cmd === "auto") await cmdAuto(args);
-    else if (args.cmd === "today") await cmdToday(args);
+    if (args.cmd === "auto") {
+      const def = loadConfig().defaultCommand;
+      if (def === "today") await cmdToday(args);
+      else if (def === "watch") await cmdWatch(args);
+      else printHelp();
+    } else if (args.cmd === "today") await cmdToday(args);
     else if (args.cmd === "watch") await cmdWatch(args);
     else if (args.cmd === "stats") await cmdStats({ view: args.statsView, debug: args.debug });
     else if (args.cmd === "config") await cmdConfig();
