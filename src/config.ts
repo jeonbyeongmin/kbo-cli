@@ -89,9 +89,9 @@ function valueLabel(value: string | number | null): string {
 }
 
 function summary(cfg: KboConfig): string {
-  const team = cfg.favoriteTeam ? colorTeam(cfg.favoriteTeam) : pc.dim("(없음)");
-  const intv = cfg.interval ? pc.cyan(`${cfg.interval}초`) : pc.dim("(없음)");
-  return `즐겨찾기 팀: ${team}\n폴링 간격: ${intv}`;
+  return buildItems()
+    .map((it) => `${it.label}: ${valueLabel(cfg[it.key] ?? null)}`)
+    .join("\n");
 }
 
 function renderConfig(items: ConfigItem[], indices: number[], cursor: number): string {
@@ -116,9 +116,7 @@ function renderConfig(items: ConfigItem[], indices: number[], cursor: number): s
 export async function cmdConfig(): Promise<void> {
   const items = buildItems();
   const cfg = loadConfig();
-  const indices: number[] = items.map((it) =>
-    valueIndex(it, cfg[it.key] as string | number | undefined)
-  );
+  const indices: number[] = items.map((it) => valueIndex(it, cfg[it.key]));
 
   if (!process.stdin.isTTY || !process.stdin.setRawMode) {
     console.log(summary(cfg));
