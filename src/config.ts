@@ -8,6 +8,7 @@ import {
   colorTeam,
   detectColumns,
   frame,
+  onResize,
   padEnd,
   pickLayoutMode,
 } from "./render.ts";
@@ -72,6 +73,7 @@ const EXIT_ALT = "\x1b[?1049l";
 const HIDE_CURSOR = "\x1b[?25l";
 const SHOW_CURSOR = "\x1b[?25h";
 const HOME = "\x1b[H";
+const CLEAR_SCREEN = "\x1b[2J";
 const CLEAR_AFTER = "\x1b[J";
 const CLEAR_LINE = "\x1b[K";
 
@@ -181,8 +183,10 @@ export async function cmdConfig(layoutOverride?: LayoutMode | "auto"): Promise<v
 
   let cursor = 0;
   let stopped = false;
+  let offResize: (() => void) | null = null;
 
   const cleanup = () => {
+    if (offResize) offResize();
     if (process.stdin.isTTY && process.stdin.setRawMode) process.stdin.setRawMode(false);
     process.stdin.pause();
     process.stdout.write(SHOW_CURSOR + EXIT_ALT);
@@ -285,6 +289,12 @@ export async function cmdConfig(layoutOverride?: LayoutMode | "auto"): Promise<v
       draw();
       return;
     }
+  });
+
+  offResize = onResize(() => {
+    if (stopped) return;
+    process.stdout.write(CLEAR_SCREEN);
+    draw();
   });
 
   draw();

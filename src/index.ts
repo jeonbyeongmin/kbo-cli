@@ -183,6 +183,7 @@ async function cmdWatch(args: Args): Promise<void> {
     intervalSec: args.intervalSec ?? cfg.interval ?? 5,
     initialGameIndex: initialIndex,
     liveGames: enriched,
+    layout: args.layout ?? cfg.layout,
   });
 }
 

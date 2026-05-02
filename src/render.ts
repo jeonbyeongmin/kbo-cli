@@ -140,6 +140,27 @@ export function wideColumnWidths(totalInner: number): { left: number; right: num
   return { left: WIDE_LEFT_INNER, right, gutter: WIDE_GUTTER };
 }
 
+const RESIZE_DEBOUNCE_MS = 50;
+
+// SIGWINCH 를 50ms 디바운스해 handler 호출. 반환값은 cleanup 함수.
+// alt-screen 루프 종료 시 호출해 process listener 누수를 막는다.
+export function onResize(handler: () => void): () => void {
+  let t: ReturnType<typeof setTimeout> | null = null;
+  const fire = () => {
+    if (t) clearTimeout(t);
+    t = setTimeout(() => {
+      t = null;
+      handler();
+    }, RESIZE_DEBOUNCE_MS);
+  };
+  process.on("SIGWINCH", fire);
+  return () => {
+    if (t) clearTimeout(t);
+    t = null;
+    process.removeListener("SIGWINCH", fire);
+  };
+}
+
 // 두 컬럼 string[] 을 줄 단위 zip 해 한 배열로 합친다. 좌측은 leftWidth 로 padEnd
 // 되어 우측 시작 위치가 일정하고, 짧은 컬럼은 빈 줄로 늘여진다.
 function joinColumns(left: string[], right: string[], leftWidth: number, gutter = 2): string[] {

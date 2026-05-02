@@ -6,6 +6,7 @@ import {
   detectColumns,
   frame,
   frameWidthFor,
+  onResize,
   padEnd,
   pickLayoutMode,
   truncName,
@@ -18,6 +19,7 @@ const EXIT_ALT = "\x1b[?1049l";
 const HIDE_CURSOR = "\x1b[?25l";
 const SHOW_CURSOR = "\x1b[?25h";
 const HOME = "\x1b[H";
+const CLEAR_SCREEN = "\x1b[2J";
 const CLEAR_AFTER = "\x1b[J";
 const CLEAR_LINE = "\x1b[K";
 
@@ -593,8 +595,10 @@ async function runTui(initial: TuiState): Promise<void> {
   let stopped = false;
   let busy = false;
   let lastError: string | null = null;
+  let offResize: (() => void) | null = null;
 
   const cleanup = () => {
+    if (offResize) offResize();
     if (process.stdin.isTTY && process.stdin.setRawMode) process.stdin.setRawMode(false);
     process.stdin.pause();
     process.stdout.write(SHOW_CURSOR + EXIT_ALT);
@@ -780,6 +784,15 @@ async function runTui(initial: TuiState): Promise<void> {
       }
     });
   }
+
+  // 리사이즈 시 cols 를 새로 측정하고 colOffset 을 0 으로 리셋해, 좁아져서
+  // 잘렸다 다시 넓어졌을 때 시프트 상태가 어색해지는 것을 방지한다.
+  offResize = onResize(() => {
+    if (stopped) return;
+    process.stdout.write(CLEAR_SCREEN);
+    state = { ...state, cols: detectColumns(), colOffset: 0 };
+    draw();
+  });
 
   draw();
   await new Promise<void>(() => {});
