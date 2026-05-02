@@ -198,6 +198,13 @@ async function cmdWatch(args: Args): Promise<void> {
   });
 }
 
+function getOnboardingHint(): string | null {
+  if (!process.stdout.isTTY) return null;
+  if (process.env.KBO_NO_HINT === "1") return null;
+  if (loadConfig().favoriteTeam) return null;
+  return pc.dim("tip: kbo config 로 즐겨찾기 팀을 설정하면 이 화면이 더 편해집니다");
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
 
@@ -219,6 +226,8 @@ async function main(): Promise<void> {
   if (args.cmd !== "update") {
     const banner = getUpdateBanner();
     if (banner) console.log(`${banner}\n`);
+    const hint = getOnboardingHint();
+    if (hint) console.log(`${hint}\n`);
     maybeTriggerBackgroundCheck();
   }
 
