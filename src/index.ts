@@ -10,7 +10,7 @@ import {
 import { readCache, writeCache } from "./cache.ts";
 import { cmdConfig, loadConfig } from "./config.ts";
 import { STATUS_RANK, matchesTeam, pickStatusGame, renderOneline } from "./oneline.ts";
-import { TEAM_NAMES, colorTeam, renderScheduleList } from "./render.ts";
+import { type LayoutMode, TEAM_NAMES, colorTeam, renderScheduleList } from "./render.ts";
 import { cmdStats } from "./stats.ts";
 import type { GameStatus } from "./types.ts";
 import {
@@ -31,6 +31,7 @@ interface Args {
   debug: boolean;
   help: boolean;
   statsView: "standings" | "batting" | "pitching";
+  layout?: LayoutMode | "auto";
 }
 
 function parseArgs(argv: string[]): Args {
@@ -50,7 +51,11 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--game") args.game = argv[++i];
     else if (a === "--date") args.date = argv[++i] ?? args.date;
     else if (a === "--interval") args.intervalSec = Math.max(1, Number(argv[++i]) || 5);
-    else if (!a.startsWith("--")) positional.push(a);
+    else if (a === "--layout") {
+      const v = argv[++i];
+      if (v === "auto" || v === "compact" || v === "normal" || v === "wide") args.layout = v;
+      else console.error(pc.yellow(`경고: --layout 값 무시 (${v}) — auto/compact/normal/wide`));
+    } else if (!a.startsWith("--")) positional.push(a);
   }
   if (positional[0] === "watch") args.cmd = "watch";
   else if (positional[0] === "update") args.cmd = "update";
@@ -85,6 +90,7 @@ function printHelp(): void {
 옵션:
   --interval <sec>   폴링 주기 (기본 5, config 폴백)
   --date <YYYY-MM-DD>
+  --layout <mode>    auto/compact/normal/wide (기본 auto, config 폴백)
   --debug            raw 응답 dump
   -h, --help
 
