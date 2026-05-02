@@ -120,8 +120,7 @@ export function pickLayoutMode(cols: number, override?: LayoutMode | "auto"): La
   if (override === "compact" || override === "normal" || override === "wide") {
     if (override === "wide") {
       // wide 인데 우측 컬럼 폭이 부족하면 normal 로 안전 격하.
-      const totalInner = Math.min(96, cols - 6);
-      const rightInner = totalInner - WIDE_LEFT_INNER - WIDE_GUTTER;
+      const rightInner = cols - 6 - WIDE_LEFT_INNER - WIDE_GUTTER;
       if (rightInner < WIDE_RIGHT_MIN) return "normal";
     }
     return override;
@@ -131,13 +130,15 @@ export function pickLayoutMode(cols: number, override?: LayoutMode | "auto"): La
   return "wide";
 }
 
+// 각 모드에서 cols 에 비례해 inner width 를 채운다 — 좌측 보더 + 우측 보더 +
+// 안전 여유 합으로 4~6 cols 를 뺀다. 좌측 컬럼 폭이 고정인 wide 만 좌측 floor
+// (WIDE_LEFT_INNER) 를 보장.
 export function frameWidthFor(mode: LayoutMode, cols: number): number {
   if (mode === "compact") return Math.max(40, cols - 4);
   if (mode === "wide") {
-    const total = Math.min(96, cols - 6);
-    return Math.max(WIDE_LEFT_INNER + WIDE_GUTTER + WIDE_RIGHT_MIN, total);
+    return Math.max(WIDE_LEFT_INNER + WIDE_GUTTER + WIDE_RIGHT_MIN, cols - 6);
   }
-  return W;
+  return Math.max(W, cols - 4);
 }
 
 export function wideColumnWidths(totalInner: number): {
