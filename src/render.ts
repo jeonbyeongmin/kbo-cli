@@ -93,7 +93,52 @@ export function padStart(s: string, width: number): string {
   return " ".repeat(width - w) + s;
 }
 
-const W = 56; // inner width of box
+const W = 56; // inner width of box (normal 모드 기본값)
+
+export type LayoutMode = "compact" | "normal" | "wide";
+
+export const NARROW_THRESHOLD = 80;
+export const WIDE_THRESHOLD = 120;
+const WIDE_LEFT_INNER = 56;
+const WIDE_GUTTER = 2;
+const WIDE_RIGHT_MIN = 24;
+
+export function detectColumns(): number {
+  const c = process.stdout.columns;
+  if (typeof c === "number" && c > 0) return c;
+  const env = Number(process.env.COLUMNS);
+  if (Number.isFinite(env) && env > 0) return env;
+  return 80;
+}
+
+export function pickLayoutMode(cols: number, override?: LayoutMode | "auto"): LayoutMode {
+  if (override === "compact" || override === "normal" || override === "wide") {
+    if (override === "wide") {
+      // wide 인데 우측 컬럼 폭이 부족하면 normal 로 안전 격하.
+      const totalInner = Math.min(96, cols - 6);
+      const rightInner = totalInner - WIDE_LEFT_INNER - WIDE_GUTTER;
+      if (rightInner < WIDE_RIGHT_MIN) return "normal";
+    }
+    return override;
+  }
+  if (cols < NARROW_THRESHOLD) return "compact";
+  if (cols < WIDE_THRESHOLD) return "normal";
+  return "wide";
+}
+
+export function frameWidthFor(mode: LayoutMode, cols: number): number {
+  if (mode === "compact") return Math.max(40, cols - 4);
+  if (mode === "wide") {
+    const total = Math.min(96, cols - 6);
+    return Math.max(WIDE_LEFT_INNER + WIDE_GUTTER + WIDE_RIGHT_MIN, total);
+  }
+  return W;
+}
+
+export function wideColumnWidths(totalInner: number): { left: number; right: number; gutter: number } {
+  const right = Math.max(WIDE_RIGHT_MIN, totalInner - WIDE_LEFT_INNER - WIDE_GUTTER);
+  return { left: WIDE_LEFT_INNER, right, gutter: WIDE_GUTTER };
+}
 
 export function frame(
   title: string,
