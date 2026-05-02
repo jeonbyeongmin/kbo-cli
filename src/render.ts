@@ -135,7 +135,11 @@ export function frameWidthFor(mode: LayoutMode, cols: number): number {
   return W;
 }
 
-export function wideColumnWidths(totalInner: number): { left: number; right: number; gutter: number } {
+export function wideColumnWidths(totalInner: number): {
+  left: number;
+  right: number;
+  gutter: number;
+} {
   const right = Math.max(WIDE_RIGHT_MIN, totalInner - WIDE_LEFT_INNER - WIDE_GUTTER);
   return { left: WIDE_LEFT_INNER, right, gutter: WIDE_GUTTER };
 }
@@ -353,11 +357,7 @@ interface RenderCtx {
   rightInner?: number;
 }
 
-function renderStartedBodyWide(
-  game: NormalizedGame,
-  ctx: RenderCtx,
-  rightInner: number
-): string[] {
+function renderStartedBodyWide(game: NormalizedGame, ctx: RenderCtx, rightInner: number): string[] {
   const left: string[] = [""];
   left.push(
     teamScoreLine(
@@ -469,11 +469,7 @@ function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): string[] {
   return body;
 }
 
-function renderResultBodyWide(
-  game: NormalizedGame,
-  ctx: RenderCtx,
-  rightInner: number
-): string[] {
+function renderResultBodyWide(game: NormalizedGame, ctx: RenderCtx, rightInner: number): string[] {
   const left: string[] = [""];
   const awayMark = game.winner === "AWAY" ? pc.yellow("  ★") : "";
   const homeMark = game.winner === "HOME" ? pc.yellow("  ★") : "";

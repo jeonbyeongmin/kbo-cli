@@ -47,11 +47,7 @@ interface ClippedColumns<T> {
 
 // 컬럼 누적 폭이 innerWidth 를 넘으면 좌측에서 offset 만큼 빼고, 우측에서
 // fit 까지만 노출한다. 잘린 양 끝은 ◂ / ▸ 인디케이터로 표시 (header/cell 측에서).
-function clipColumns<T>(
-  cols: Column<T>[],
-  innerWidth: number,
-  offset: number
-): ClippedColumns<T> {
+function clipColumns<T>(cols: Column<T>[], innerWidth: number, offset: number): ClippedColumns<T> {
   const max = Math.max(0, Math.min(offset, cols.length));
   const after = cols.slice(max);
   const visible: Column<T>[] = [];

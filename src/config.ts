@@ -163,12 +163,9 @@ function renderConfig(
   } else {
     body.push(pc.dim("값은 ←/→ 로 변경, s 또는 Enter 로 저장합니다."));
   }
-  return frame(
-    "kbo config",
-    body,
-    "↑/↓: 항목  ←/→: 값  s/Enter: 저장  q: 종료",
-    innerWidth
-  ).join("\n");
+  return frame("kbo config", body, "↑/↓: 항목  ←/→: 값  s/Enter: 저장  q: 종료", innerWidth).join(
+    "\n"
+  );
 }
 
 export async function cmdConfig(layoutOverride?: LayoutMode | "auto"): Promise<void> {
