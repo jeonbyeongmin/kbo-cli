@@ -72,7 +72,7 @@ function printHelp(): void {
   kbo --version                현재 버전 출력
 
 옵션:
-  --interval <sec>   폴링 주기 (기본 5)
+  --interval <sec>   폴링 주기 (기본 5, config 폴백)
   --date <YYYY-MM-DD>
   --debug            raw 응답 dump
   -h, --help
