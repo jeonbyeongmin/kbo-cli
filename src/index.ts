@@ -59,7 +59,7 @@ function printHelp(): void {
   console.log(`${pc.bold("kbo")} — KBO 라이브 중계 TUI
 
 사용법:
-  kbo                          오늘 경기 목록
+  kbo                          오늘 경기 목록 (즐겨찾기 팀 라이브 시 watch 자동)
   kbo today --date 2026-05-01  특정 날짜 경기 목록
   kbo watch                    진행중 경기 라이브 중계 (자동 선택)
   kbo watch --team LG          팀 자동 선택
