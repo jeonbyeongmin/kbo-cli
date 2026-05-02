@@ -69,6 +69,11 @@ function buildItems(): ConfigItem[] {
       label: "즐겨찾기 팀",
       values: [...TEAM_NAMES, null],
     },
+    {
+      key: "interval",
+      label: "폴링 간격",
+      values: [1, 2, 3, 5, 10, 15, 30, null],
+    },
   ];
 }
 
@@ -110,7 +115,9 @@ function renderConfig(items: ConfigItem[], indices: number[], cursor: number): s
 export async function cmdConfig(): Promise<void> {
   const items = buildItems();
   const cfg = loadConfig();
-  const indices: number[] = items.map((it) => valueIndex(it, cfg[it.key] as string | undefined));
+  const indices: number[] = items.map((it) =>
+    valueIndex(it, cfg[it.key] as string | number | undefined)
+  );
 
   if (!process.stdin.isTTY || !process.stdin.setRawMode) {
     console.log(summary(cfg));
