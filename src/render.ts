@@ -174,6 +174,16 @@ function diamondLines(bases: { first: boolean; second: boolean; third: boolean }
   ];
 }
 
+function compactDiamond(bases: { first: boolean; second: boolean; third: boolean }): string {
+  const fill = pc.yellow("◆");
+  const empty = pc.dim("◇");
+  return `2:${bases.second ? fill : empty}  3:${bases.third ? fill : empty}  1:${bases.first ? fill : empty}`;
+}
+
+function compactCountLine(ball: number, strike: number, out: number): string {
+  return `B ${dots(ball, 3, pc.green)}  S ${dots(strike, 2, pc.yellow)}  O ${dots(out, 2, pc.red)}`;
+}
+
 function dots(filled: number, total: number, color: (s: string) => string): string {
   const out: string[] = [];
   for (let i = 0; i < total; i++) out.push(i < filled ? color("●") : pc.dim("○"));
@@ -205,7 +215,7 @@ export function truncName(name: string): string {
   return trimToWidth(name, NAME_COL);
 }
 
-function renderBatterSection(b: BatterStats | null): string[] {
+function renderBatterSection(b: BatterStats | null, compact: boolean): string[] {
   const lines: string[] = [];
   lines.push(pc.dim("  ─ 타자 ─"));
   if (!b) {
@@ -215,6 +225,7 @@ function renderBatterSection(b: BatterStats | null): string[] {
   const nameCell = padEnd(truncName(b.name || "?"), NAME_COL);
   const seasonPart = b.seasonAvg ? `시즌 AVG ${b.seasonAvg}` : pc.dim("시즌 기록 없음");
   lines.push(`  ${nameCell}  ${seasonPart}`);
+  if (compact) return lines;
   if (b.todayLine) {
     const tail = b.todayAvg ? `  ${pc.dim(`(AVG ${b.todayAvg})`)}` : "";
     lines.push(`  ${padEnd(pc.dim("오늘"), NAME_COL)}  ${b.todayLine}${tail}`);
@@ -225,7 +236,7 @@ function renderBatterSection(b: BatterStats | null): string[] {
   return lines;
 }
 
-function renderPitcherSection(p: PitcherStats | null): string[] {
+function renderPitcherSection(p: PitcherStats | null, compact: boolean): string[] {
   const lines: string[] = [];
   lines.push(pc.dim("  ─ 투수 ─"));
   if (!p) {
@@ -235,6 +246,7 @@ function renderPitcherSection(p: PitcherStats | null): string[] {
   const nameCell = padEnd(truncName(p.name || "?"), NAME_COL);
   const seasonPart = p.seasonEra ? `시즌 ERA ${p.seasonEra}` : pc.dim("시즌 기록 없음");
   lines.push(`  ${nameCell}  ${seasonPart}`);
+  if (compact) return lines;
   if (p.todayLine) {
     const tail = p.todayEra ? `  ${pc.dim(`(ERA ${p.todayEra})`)}` : "";
     lines.push(`  ${padEnd(pc.dim("오늘"), NAME_COL)}  ${p.todayLine}${tail}`);
@@ -260,17 +272,31 @@ function labelValueRows(rows: [string, string | null | undefined][]): string[] {
     .map(([label, value]) => `  ${padEnd(pc.dim(label), NAME_COL)}  ${value}`);
 }
 
-function inningLineSection(game: NormalizedGame): string[] {
+function inningLineSection(game: NormalizedGame, ctx: RenderCtx): string[] {
   if (game.inningLine.away.length === 0) return [];
   const innings = game.inningLine.away.length;
-  const headerCells = Array.from({ length: innings }, (_, i) => String(i + 1).padStart(2)).join(
-    " "
-  );
-  return [
-    `  ${pc.dim(padEnd("회", 6))} ${pc.dim(headerCells)}`,
-    `  ${padEnd(game.awayTeamName, 6)} ${game.inningLine.away.map((v) => v.padStart(2)).join(" ")}`,
-    `  ${padEnd(game.homeTeamName, 6)} ${game.inningLine.home.map((v) => v.padStart(2)).join(" ")}`,
-  ];
+  // compact 에선 4회 단위로 줄바꿈해 좁은 폭에서도 정렬 유지.
+  const chunkSize = ctx.mode === "compact" ? 4 : innings;
+  const out: string[] = [];
+  for (let i = 0; i < innings; i += chunkSize) {
+    const len = Math.min(chunkSize, innings - i);
+    const headerCells = Array.from({ length: len }, (_, k) => String(i + k + 1).padStart(2)).join(
+      " "
+    );
+    const awaySlice = game.inningLine.away
+      .slice(i, i + len)
+      .map((v) => v.padStart(2))
+      .join(" ");
+    const homeSlice = game.inningLine.home
+      .slice(i, i + len)
+      .map((v) => v.padStart(2))
+      .join(" ");
+    out.push(`  ${pc.dim(padEnd("회", 6))} ${pc.dim(headerCells)}`);
+    out.push(`  ${padEnd(game.awayTeamName, 6)} ${awaySlice}`);
+    out.push(`  ${padEnd(game.homeTeamName, 6)} ${homeSlice}`);
+    if (i + chunkSize < innings) out.push("");
+  }
+  return out;
 }
 
 interface RenderCtx {
@@ -280,6 +306,7 @@ interface RenderCtx {
 }
 
 function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): string[] {
+  const compact = ctx.mode === "compact";
   const body: string[] = [""];
   body.push(
     teamScoreLine(
@@ -297,25 +324,31 @@ function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): string[] {
   );
   body.push("");
 
-  const diamond = diamondLines(game.bases);
-  const countBlock = [
-    "",
-    `  B  ${dots(game.ball, 3, pc.green)}`,
-    `  S  ${dots(game.strike, 2, pc.yellow)}`,
-    `  O  ${dots(game.out, 2, pc.red)}`,
-    "",
-  ];
-  for (let i = 0; i < diamond.length; i++) {
-    body.push(`${diamond[i] ?? ""}    ${countBlock[i] ?? ""}`);
+  if (compact) {
+    body.push(`  ${compactDiamond(game.bases)}`);
+    body.push(`  ${compactCountLine(game.ball, game.strike, game.out)}`);
+    body.push("");
+  } else {
+    const diamond = diamondLines(game.bases);
+    const countBlock = [
+      "",
+      `  B  ${dots(game.ball, 3, pc.green)}`,
+      `  S  ${dots(game.strike, 2, pc.yellow)}`,
+      `  O  ${dots(game.out, 2, pc.red)}`,
+      "",
+    ];
+    for (let i = 0; i < diamond.length; i++) {
+      body.push(`${diamond[i] ?? ""}    ${countBlock[i] ?? ""}`);
+    }
+    body.push("");
   }
+
+  for (const ln of renderBatterSection(game.batterStats, compact)) body.push(ln);
+  body.push("");
+  for (const ln of renderPitcherSection(game.pitcherStats, compact)) body.push(ln);
   body.push("");
 
-  for (const ln of renderBatterSection(game.batterStats)) body.push(ln);
-  body.push("");
-  for (const ln of renderPitcherSection(game.pitcherStats)) body.push(ln);
-  body.push("");
-
-  const inningLines = inningLineSection(game);
+  const inningLines = inningLineSection(game, ctx);
   if (inningLines.length > 0) {
     for (const ln of inningLines) body.push(ln);
     body.push("");
@@ -323,7 +356,8 @@ function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): string[] {
 
   if (game.recentPlays.length > 0) {
     body.push(pc.dim("  ─ 최근 플레이 ─"));
-    for (const p of game.recentPlays.slice(0, 5)) {
+    const limit = compact ? 3 : 5;
+    for (const p of game.recentPlays.slice(0, limit)) {
       body.push(`  • ${trimToWidth(p, ctx.innerWidth - 4)}`);
     }
   }
@@ -364,7 +398,7 @@ function renderResultBody(game: NormalizedGame, ctx: RenderCtx): string[] {
     body.push("");
   }
 
-  const inningLines = inningLineSection(game);
+  const inningLines = inningLineSection(game, ctx);
   if (inningLines.length > 0) {
     for (const ln of inningLines) body.push(ln);
     body.push("");
@@ -373,7 +407,8 @@ function renderResultBody(game: NormalizedGame, ctx: RenderCtx): string[] {
   const highlights = filterResultHighlights(game.recentPlays);
   if (highlights.length > 0) {
     body.push(pc.dim("  ─ 하이라이트 ─"));
-    for (const p of highlights.slice(0, 5)) {
+    const limit = ctx.mode === "compact" ? 3 : 5;
+    for (const p of highlights.slice(0, limit)) {
       body.push(`  • ${trimToWidth(p, ctx.innerWidth - 4)}`);
     }
   }
