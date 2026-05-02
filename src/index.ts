@@ -90,6 +90,10 @@ function printHelp(): void {
 `);
 }
 
+function matchesTeam(g: { homeTeamName: string; awayTeamName: string }, name: string): boolean {
+  return g.homeTeamName === name || g.awayTeamName === name;
+}
+
 async function cmdToday(args: Args): Promise<void> {
   const games = await fetchSchedule(args.date);
   if (args.debug) {
@@ -113,7 +117,7 @@ async function cmdAuto(args: Args): Promise<void> {
       g.statusCode === "BEFORE" ||
       g.statusCode === "READY" ||
       g.statusCode === "SUSPENDED";
-    return live && (g.homeTeamName === favoriteTeam || g.awayTeamName === favoriteTeam);
+    return live && matchesTeam(g, favoriteTeam);
   });
   if (liveFavorite) {
     console.log(pc.dim(`즐겨찾기 팀 ${favoriteTeam} 라이브 — watch 모드 진입`));
@@ -161,9 +165,7 @@ async function cmdWatch(args: Args): Promise<void> {
     }
     live = [exact];
   } else if (args.team) {
-    const filtered = live.filter(
-      (g) => g.homeTeamName === args.team || g.awayTeamName === args.team
-    );
+    const filtered = live.filter((g) => matchesTeam(g, args.team!));
     if (filtered.length === 0) {
       console.error(pc.red(`${args.team} 의 경기를 찾지 못했습니다.`));
       process.exit(1);
@@ -174,9 +176,7 @@ async function cmdWatch(args: Args): Promise<void> {
     // ←/→ 로 다른 경기도 그대로 순환할 수 있게.
     const fallbackTeam = cfg.favoriteTeam;
     if (fallbackTeam) {
-      const idx = live.findIndex(
-        (g) => g.homeTeamName === fallbackTeam || g.awayTeamName === fallbackTeam
-      );
+      const idx = live.findIndex((g) => matchesTeam(g, fallbackTeam));
       if (idx >= 0) initialIndex = idx;
       else console.log(pc.dim(`즐겨찾기 팀 ${fallbackTeam} 경기 없음 — 전체 표시`));
     }
