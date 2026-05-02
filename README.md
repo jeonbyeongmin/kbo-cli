@@ -36,7 +36,7 @@ kbo watch --game 20260501NCLG02026 --interval 3
 kbo stats                                # 팀 순위 (←/→ 정렬 전환)
 kbo stats batting                        # 타자 리더보드
 kbo stats pitching                       # 투수 리더보드
-kbo config                               # 즐겨찾기 팀 등 설정 (인터랙티브)
+kbo config                               # 즐겨찾기 팀 / 폴링 간격 설정 (인터랙티브)
 kbo --help
 ```
 
