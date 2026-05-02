@@ -1,6 +1,6 @@
 import pc from "picocolors";
 import { fetchGameBasic, fetchRelay, fetchSchedule, isPlayable, todayDate } from "./api.ts";
-import { cmdConfig } from "./config.ts";
+import { cmdConfig, loadConfig } from "./config.ts";
 import { renderScheduleList } from "./render.ts";
 import { cmdStats } from "./stats.ts";
 import type { GameStatus } from "./types.ts";
@@ -135,15 +135,25 @@ async function cmdWatch(args: Args): Promise<void> {
       process.exit(1);
     }
     live = [exact];
-  } else if (args.team) {
-    const filtered = live.filter(
-      (g) => g.homeTeamName === args.team || g.awayTeamName === args.team
-    );
-    if (filtered.length === 0) {
-      console.error(pc.red(`${args.team} 의 경기를 찾지 못했습니다.`));
-      process.exit(1);
+  } else {
+    const explicitTeam = args.team;
+    const fallbackTeam = explicitTeam ? undefined : loadConfig().favoriteTeam;
+    const resolvedTeam = explicitTeam ?? fallbackTeam;
+    if (resolvedTeam) {
+      const filtered = live.filter(
+        (g) => g.homeTeamName === resolvedTeam || g.awayTeamName === resolvedTeam
+      );
+      if (filtered.length === 0) {
+        // 명시 --team 은 그대로 에러 종료, 폴백이면 전체 live 로 진행하고 안내만.
+        if (explicitTeam) {
+          console.error(pc.red(`${explicitTeam} 의 경기를 찾지 못했습니다.`));
+          process.exit(1);
+        }
+        console.log(pc.dim(`즐겨찾기 팀 ${fallbackTeam} 경기 없음 — 전체 표시`));
+      } else {
+        live = filtered;
+      }
     }
-    live = filtered;
   }
 
   if (live.length === 0) {
