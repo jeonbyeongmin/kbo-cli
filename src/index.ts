@@ -14,7 +14,7 @@ import {
 import { watch } from "./watch.ts";
 
 interface Args {
-  cmd: "today" | "watch" | "update" | "stats" | "config";
+  cmd: "auto" | "today" | "watch" | "update" | "stats" | "config";
   date: string;
   team?: string;
   game?: string;
@@ -26,7 +26,7 @@ interface Args {
 
 function parseArgs(argv: string[]): Args {
   const args: Args = {
-    cmd: "today",
+    cmd: "auto",
     date: todayDate(),
     debug: false,
     help: false,
@@ -51,7 +51,7 @@ function parseArgs(argv: string[]): Args {
     if (positional[1] === "batting") args.statsView = "batting";
     else if (positional[1] === "pitching") args.statsView = "pitching";
     else args.statsView = "standings";
-  } else if (positional[0] === "today" || positional[0] === undefined) args.cmd = "today";
+  } else if (positional[0] === "today") args.cmd = "today";
   return args;
 }
 
@@ -59,7 +59,7 @@ function printHelp(): void {
   console.log(`${pc.bold("kbo")} — KBO 라이브 중계 TUI
 
 사용법:
-  kbo                          오늘 경기 목록
+  kbo                          오늘 경기 목록 (즐겨찾기 팀 라이브 시 watch 자동)
   kbo today --date 2026-05-01  특정 날짜 경기 목록
   kbo watch                    진행중 경기 라이브 중계 (자동 선택)
   kbo watch --team LG          팀 자동 선택
@@ -90,6 +90,10 @@ function printHelp(): void {
 `);
 }
 
+function matchesTeam(g: { homeTeamName: string; awayTeamName: string }, name: string): boolean {
+  return g.homeTeamName === name || g.awayTeamName === name;
+}
+
 async function cmdToday(args: Args): Promise<void> {
   const games = await fetchSchedule(args.date);
   if (args.debug) {
@@ -98,6 +102,29 @@ async function cmdToday(args: Args): Promise<void> {
   }
   const favoriteTeam = loadConfig().favoriteTeam;
   console.log(renderScheduleList(games, args.date, favoriteTeam));
+}
+
+async function cmdAuto(args: Args): Promise<void> {
+  const favoriteTeam = loadConfig().favoriteTeam;
+  if (!favoriteTeam) {
+    await cmdToday(args);
+    return;
+  }
+  const games = await fetchSchedule(args.date);
+  const liveFavorite = games.find((g) => {
+    const live =
+      g.statusCode === "STARTED" ||
+      g.statusCode === "BEFORE" ||
+      g.statusCode === "READY" ||
+      g.statusCode === "SUSPENDED";
+    return live && matchesTeam(g, favoriteTeam);
+  });
+  if (liveFavorite) {
+    console.log(pc.dim(`즐겨찾기 팀 ${favoriteTeam} 라이브 — watch 모드 진입`));
+    await cmdWatch(args);
+  } else {
+    await cmdToday(args);
+  }
 }
 
 // watch 박스 회전 순서 — 라이브 > 시작 전 > 중단 > 종료. isPlayable 에서 빠진 status 는 정의하지 않는다.
@@ -138,9 +165,7 @@ async function cmdWatch(args: Args): Promise<void> {
     }
     live = [exact];
   } else if (args.team) {
-    const filtered = live.filter(
-      (g) => g.homeTeamName === args.team || g.awayTeamName === args.team
-    );
+    const filtered = live.filter((g) => matchesTeam(g, args.team!));
     if (filtered.length === 0) {
       console.error(pc.red(`${args.team} 의 경기를 찾지 못했습니다.`));
       process.exit(1);
@@ -151,9 +176,7 @@ async function cmdWatch(args: Args): Promise<void> {
     // ←/→ 로 다른 경기도 그대로 순환할 수 있게.
     const fallbackTeam = cfg.favoriteTeam;
     if (fallbackTeam) {
-      const idx = live.findIndex(
-        (g) => g.homeTeamName === fallbackTeam || g.awayTeamName === fallbackTeam
-      );
+      const idx = live.findIndex((g) => matchesTeam(g, fallbackTeam));
       if (idx >= 0) initialIndex = idx;
       else console.log(pc.dim(`즐겨찾기 팀 ${fallbackTeam} 경기 없음 — 전체 표시`));
     }
@@ -200,7 +223,8 @@ async function main(): Promise<void> {
   }
 
   try {
-    if (args.cmd === "today") await cmdToday(args);
+    if (args.cmd === "auto") await cmdAuto(args);
+    else if (args.cmd === "today") await cmdToday(args);
     else if (args.cmd === "watch") await cmdWatch(args);
     else if (args.cmd === "stats") await cmdStats({ view: args.statsView, debug: args.debug });
     else if (args.cmd === "config") await cmdConfig();

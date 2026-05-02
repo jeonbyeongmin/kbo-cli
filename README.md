@@ -28,7 +28,7 @@ kbo watch
 ## 사용
 
 ```bash
-kbo                                      # 오늘 경기 목록
+kbo                                      # 오늘 경기 목록 (즐겨찾기 팀 라이브 시 watch 자동)
 kbo today --date 2026-05-01
 kbo watch                                # 진행중 경기 라이브
 kbo watch --team LG
