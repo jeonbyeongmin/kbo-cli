@@ -224,11 +224,11 @@ function compactDiamond(bases: { first: boolean; second: boolean; third: boolean
   return `2:${bases.second ? fill : empty}  3:${bases.third ? fill : empty}  1:${bases.first ? fill : empty}`;
 }
 
-function compactCountLine(ball: number, strike: number, out: number): string {
+export function compactCountLine(ball: number, strike: number, out: number): string {
   return `B ${dots(ball, 3, pc.green)}  S ${dots(strike, 2, pc.yellow)}  O ${dots(out, 2, pc.red)}`;
 }
 
-function dots(filled: number, total: number, color: (s: string) => string): string {
+export function dots(filled: number, total: number, color: (s: string) => string): string {
   const out: string[] = [];
   for (let i = 0; i < total; i++) out.push(i < filled ? color("●") : pc.dim("○"));
   return out.join("");
@@ -379,17 +379,8 @@ function renderStartedBodyWide(game: NormalizedGame, ctx: RenderCtx, rightInner:
     )
   );
   left.push("");
-  const diamond = diamondLines(game.bases);
-  const countBlock = [
-    "",
-    `  B  ${dots(game.ball, 3, pc.green)}`,
-    `  S  ${dots(game.strike, 2, pc.yellow)}`,
-    `  O  ${dots(game.out, 2, pc.red)}`,
-    "",
-  ];
-  for (let i = 0; i < diamond.length; i++) {
-    left.push(`${diamond[i] ?? ""}    ${countBlock[i] ?? ""}`);
-  }
+  left.push(...diamondLines(game.bases));
+  left.push(`  ${compactCountLine(game.ball, game.strike, game.out)}`);
   left.push("");
   const inningLines = inningLineSection(game, { ...ctx, mode: "normal" });
   for (const ln of inningLines) left.push(ln);
@@ -439,17 +430,8 @@ function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): string[] {
     body.push(`  ${compactCountLine(game.ball, game.strike, game.out)}`);
     body.push("");
   } else {
-    const diamond = diamondLines(game.bases);
-    const countBlock = [
-      "",
-      `  B  ${dots(game.ball, 3, pc.green)}`,
-      `  S  ${dots(game.strike, 2, pc.yellow)}`,
-      `  O  ${dots(game.out, 2, pc.red)}`,
-      "",
-    ];
-    for (let i = 0; i < diamond.length; i++) {
-      body.push(`${diamond[i] ?? ""}    ${countBlock[i] ?? ""}`);
-    }
+    body.push(...diamondLines(game.bases));
+    body.push(`  ${compactCountLine(game.ball, game.strike, game.out)}`);
     body.push("");
   }
 
