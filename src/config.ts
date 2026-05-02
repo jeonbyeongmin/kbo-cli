@@ -7,6 +7,7 @@ import { TEAM_NAMES, colorTeam, frame, padEnd } from "./render.ts";
 export interface KboConfig {
   favoriteTeam?: string;
   interval?: number;
+  defaultCommand?: "today" | "watch";
 }
 
 function configDir(): string {
@@ -33,6 +34,10 @@ export function loadConfig(): KboConfig {
   const intv = (raw as { interval?: unknown }).interval;
   if (typeof intv === "number" && Number.isInteger(intv) && intv >= 1 && intv <= 3600) {
     cfg.interval = intv;
+  }
+  const dc = (raw as { defaultCommand?: unknown }).defaultCommand;
+  if (typeof dc === "string" && (dc === "today" || dc === "watch")) {
+    cfg.defaultCommand = dc;
   }
   return cfg;
 }
@@ -166,6 +171,13 @@ export async function cmdConfig(): Promise<void> {
       if (value == null) return;
       if (item.key === "favoriteTeam" && typeof value === "string") next.favoriteTeam = value;
       if (item.key === "interval" && typeof value === "number") next.interval = value;
+      if (
+        item.key === "defaultCommand" &&
+        typeof value === "string" &&
+        (value === "today" || value === "watch")
+      ) {
+        next.defaultCommand = value;
+      }
     });
     try {
       saveConfig(next);
