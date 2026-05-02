@@ -1,5 +1,6 @@
 import pc from "picocolors";
 import { fetchGameBasic, fetchRelay, fetchSchedule, isPlayable, todayDate } from "./api.ts";
+import { cmdConfig } from "./config.ts";
 import { renderScheduleList } from "./render.ts";
 import { cmdStats } from "./stats.ts";
 import type { GameStatus } from "./types.ts";
@@ -13,7 +14,7 @@ import {
 import { watch } from "./watch.ts";
 
 interface Args {
-  cmd: "today" | "watch" | "update" | "stats";
+  cmd: "today" | "watch" | "update" | "stats" | "config";
   date: string;
   team?: string;
   game?: string;
@@ -45,6 +46,7 @@ function parseArgs(argv: string[]): Args {
   }
   if (positional[0] === "watch") args.cmd = "watch";
   else if (positional[0] === "update") args.cmd = "update";
+  else if (positional[0] === "config") args.cmd = "config";
   else if (positional[0] === "stats") {
     args.cmd = "stats";
     if (positional[1] === "batting") args.statsView = "batting";
@@ -66,6 +68,7 @@ function printHelp(): void {
   kbo stats                    팀 순위 (인터랙티브 정렬)
   kbo stats batting            타자 리더보드
   kbo stats pitching           투수 리더보드
+  kbo config                   즐겨찾기 팀 등 설정 (인터랙티브)
   kbo update                   최신 버전으로 업데이트
   kbo --version                현재 버전 출력
 
@@ -81,9 +84,10 @@ function printHelp(): void {
 라이브/통계 화면 키:
   q          종료
   r          즉시 새로고침
-  ←/→        watch: 진행중 경기 전환 · stats: 정렬/카테고리 전환
-  ↑/↓        stats 순위: 뷰 토글 · stats 리더보드: 행 스크롤
+  ←/→        watch: 진행중 경기 전환 · stats: 정렬/카테고리 전환 · config: 값 변경
+  ↑/↓        stats 순위: 뷰 토글 · stats 리더보드: 행 스크롤 · config: 항목 이동
   t          stats 리더보드: 팀 필터 cycling
+  s/Enter    config: 저장 후 종료
 `);
 }
 
@@ -186,6 +190,7 @@ async function main(): Promise<void> {
     if (args.cmd === "today") await cmdToday(args);
     else if (args.cmd === "watch") await cmdWatch(args);
     else if (args.cmd === "stats") await cmdStats({ view: args.statsView, debug: args.debug });
+    else if (args.cmd === "config") await cmdConfig();
     else if (args.cmd === "update") await runUpdate();
   } catch (e) {
     console.error(pc.red(`\n에러: ${(e as Error).message}`));
