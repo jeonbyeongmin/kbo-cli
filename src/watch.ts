@@ -21,6 +21,10 @@ const HOME = "\x1b[H";
 const CLEAR_SCREEN = "\x1b[2J";
 const CLEAR_AFTER = "\x1b[J";
 const CLEAR_LINE = "\x1b[K";
+const KEY_UP = "\x1b[A";
+const KEY_DOWN = "\x1b[B";
+const KEY_RIGHT = "\x1b[C";
+const KEY_LEFT = "\x1b[D";
 
 interface WatchOptions {
   intervalSec: number;
@@ -37,14 +41,14 @@ export async function watch(opts: WatchOptions): Promise<void> {
   let liveGames = opts.liveGames;
   let historyOffset = 0;
 
-  const clampHistoryOffset = () => {
+  const setHistoryOffset = (next: number) => {
     if (!lastGame || lastGame.status !== "STARTED") {
       historyOffset = 0;
       return;
     }
     const viewport = recentViewportFor(opts.layout);
     const maxOffset = Math.max(0, lastGame.recentPlays.length - viewport);
-    if (historyOffset > maxOffset) historyOffset = maxOffset;
+    historyOffset = Math.max(0, Math.min(next, maxOffset));
   };
 
   let stopped = false;
@@ -93,29 +97,24 @@ export async function watch(opts: WatchOptions): Promise<void> {
         void poll();
         return;
       }
-      // arrow keys: \x1b[A = up, \x1b[B = down, \x1b[C = right, \x1b[D = left
-      if (data === "\x1b[A") {
-        if (!lastGame || lastGame.status !== "STARTED") return;
-        const viewport = recentViewportFor(opts.layout);
-        const maxOffset = Math.max(0, lastGame.recentPlays.length - viewport);
-        historyOffset = Math.min(historyOffset + 1, maxOffset);
+      if (data === KEY_UP) {
+        setHistoryOffset(historyOffset + 1);
         draw();
         return;
       }
-      if (data === "\x1b[B") {
-        if (!lastGame || lastGame.status !== "STARTED") return;
-        historyOffset = Math.max(0, historyOffset - 1);
+      if (data === KEY_DOWN) {
+        setHistoryOffset(historyOffset - 1);
         draw();
         return;
       }
-      if (data === "\x1b[C") {
+      if (data === KEY_RIGHT) {
         idx = (idx + 1) % liveGames.length;
         lastGame = null;
         historyOffset = 0;
         void poll();
         return;
       }
-      if (data === "\x1b[D") {
+      if (data === KEY_LEFT) {
         idx = (idx - 1 + liveGames.length) % liveGames.length;
         lastGame = null;
         historyOffset = 0;
@@ -170,7 +169,7 @@ export async function watch(opts: WatchOptions): Promise<void> {
       lastGame = normalize(sched, relay);
       lastFetch = Date.now();
       lastError = null;
-      clampHistoryOffset();
+      setHistoryOffset(historyOffset);
     } catch (e) {
       lastError = `fetch 실패: ${(e as Error).message}`;
     } finally {
@@ -195,7 +194,7 @@ export async function watch(opts: WatchOptions): Promise<void> {
   // 자동으로 따라잡으므로 별도 state 보관 불필요.
   offResize = onResize(() => {
     if (stopped) return;
-    clampHistoryOffset();
+    setHistoryOffset(historyOffset);
     process.stdout.write(CLEAR_SCREEN);
     draw();
   });

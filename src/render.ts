@@ -360,8 +360,8 @@ interface RenderCtx {
   mode: LayoutMode;
   innerWidth: number;
   rightInner?: number;
-  historyOffset?: number;
-  recentViewport?: number;
+  historyOffset: number;
+  recentViewport: number;
 }
 
 function recentSectionHeader(offset: number, viewport: number, total: number): string {
@@ -403,8 +403,7 @@ function renderStartedBodyWide(game: NormalizedGame, ctx: RenderCtx, rightInner:
   }
   right.push("");
   if (game.recentPlays.length > 0) {
-    const viewport = ctx.recentViewport ?? 7;
-    const offset = ctx.historyOffset ?? 0;
+    const { recentViewport: viewport, historyOffset: offset } = ctx;
     right.push(recentSectionHeader(offset, viewport, game.recentPlays.length));
     for (const p of game.recentPlays.slice(offset, offset + viewport)) {
       right.push(trimToWidth(`  • ${p}`, rightInner));
@@ -457,8 +456,7 @@ function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): string[] {
   }
 
   if (game.recentPlays.length > 0) {
-    const viewport = ctx.recentViewport ?? (compact ? 3 : 5);
-    const offset = ctx.historyOffset ?? 0;
+    const { recentViewport: viewport, historyOffset: offset } = ctx;
     body.push(recentSectionHeader(offset, viewport, game.recentPlays.length));
     for (const p of game.recentPlays.slice(offset, offset + viewport)) {
       body.push(`  • ${trimToWidth(p, ctx.innerWidth - 4)}`);
