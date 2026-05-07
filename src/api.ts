@@ -191,7 +191,7 @@ function buildPitcherStats(p: LineupPlayer | null): PitcherStats | null {
 // API 가 이닝 구분으로 끼워넣는 sentinel — 의미 없으니 항상 제거.
 const SENTINEL_RE = /^=+$/;
 
-function collectRecentPlays(relay: TextRelayData, max = 6): string[] {
+function collectRecentPlays(relay: TextRelayData, max = 100): string[] {
   const plays: { seq: number; text: string }[] = [];
   for (const ab of relay.textRelays) {
     for (const opt of ab.textOptions) {
