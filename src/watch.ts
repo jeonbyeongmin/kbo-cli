@@ -1,6 +1,17 @@
 import { fetchRelay, fetchSchedule, isPlayable, normalize, todayDate } from "./api.ts";
-import { type LayoutMode, onResize, renderGame } from "./render.ts";
+import {
+  detectColumns,
+  type LayoutMode,
+  onResize,
+  pickLayoutMode,
+  recentViewportForMode,
+  renderGame,
+} from "./render.ts";
 import type { NormalizedGame, ScheduleGame } from "./types.ts";
+
+function recentViewportFor(layout: LayoutMode | "auto" | undefined): number {
+  return recentViewportForMode(pickLayoutMode(detectColumns(), layout));
+}
 
 const ENTER_ALT = "\x1b[?1049h";
 const EXIT_ALT = "\x1b[?1049l";
@@ -24,6 +35,17 @@ export async function watch(opts: WatchOptions): Promise<void> {
   let lastFetch = 0;
   let lastError: string | null = null;
   let liveGames = opts.liveGames;
+  let historyOffset = 0;
+
+  const clampHistoryOffset = () => {
+    if (!lastGame || lastGame.status !== "STARTED") {
+      historyOffset = 0;
+      return;
+    }
+    const viewport = recentViewportFor(opts.layout);
+    const maxOffset = Math.max(0, lastGame.recentPlays.length - viewport);
+    if (historyOffset > maxOffset) historyOffset = maxOffset;
+  };
 
   let stopped = false;
   let pollInFlight = false;
@@ -67,19 +89,36 @@ export async function watch(opts: WatchOptions): Promise<void> {
         return;
       }
       if (data === "r" || data === "R") {
+        historyOffset = 0;
         void poll();
         return;
       }
-      // arrow keys: \x1b[D = left, \x1b[C = right
+      // arrow keys: \x1b[A = up, \x1b[B = down, \x1b[C = right, \x1b[D = left
+      if (data === "\x1b[A") {
+        if (!lastGame || lastGame.status !== "STARTED") return;
+        const viewport = recentViewportFor(opts.layout);
+        const maxOffset = Math.max(0, lastGame.recentPlays.length - viewport);
+        historyOffset = Math.min(historyOffset + 1, maxOffset);
+        draw();
+        return;
+      }
+      if (data === "\x1b[B") {
+        if (!lastGame || lastGame.status !== "STARTED") return;
+        historyOffset = Math.max(0, historyOffset - 1);
+        draw();
+        return;
+      }
       if (data === "\x1b[C") {
         idx = (idx + 1) % liveGames.length;
         lastGame = null;
+        historyOffset = 0;
         void poll();
         return;
       }
       if (data === "\x1b[D") {
         idx = (idx - 1 + liveGames.length) % liveGames.length;
         lastGame = null;
+        historyOffset = 0;
         void poll();
         return;
       }
@@ -100,6 +139,7 @@ export async function watch(opts: WatchOptions): Promise<void> {
         staleSec: isLive && stale > staleThreshold ? stale : 0,
         multiGame: liveGames.length > 1,
         layout: opts.layout,
+        historyOffset,
       });
     } else if (lastError) {
       body = `\n  ${lastError}\n`;
@@ -130,6 +170,7 @@ export async function watch(opts: WatchOptions): Promise<void> {
       lastGame = normalize(sched, relay);
       lastFetch = Date.now();
       lastError = null;
+      clampHistoryOffset();
     } catch (e) {
       lastError = `fetch 실패: ${(e as Error).message}`;
     } finally {
@@ -154,6 +195,7 @@ export async function watch(opts: WatchOptions): Promise<void> {
   // 자동으로 따라잡으므로 별도 state 보관 불필요.
   offResize = onResize(() => {
     if (stopped) return;
+    clampHistoryOffset();
     process.stdout.write(CLEAR_SCREEN);
     draw();
   });
