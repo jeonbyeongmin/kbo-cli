@@ -103,9 +103,7 @@ describe("renderGame STARTED 최근 플레이 historyOffset", () => {
   const tenPlays = Array.from({ length: 10 }, (_, i) => `p${i}`);
 
   test("offset 0 이면 ─ 최근 플레이 ─ 헤더 그대로", () => {
-    const out = strip(
-      renderGame(makeStarted({ recentPlays: tenPlays }), { layout: "normal" })
-    );
+    const out = strip(renderGame(makeStarted({ recentPlays: tenPlays }), { layout: "normal" }));
     expect(out).toContain("최근 플레이");
     expect(out).not.toContain("히스토리");
   });
@@ -140,9 +138,7 @@ describe("renderGame STARTED 최근 플레이 historyOffset", () => {
     const prevCols = process.env.COLUMNS;
     process.env.COLUMNS = "140";
     try {
-      const out = strip(
-        renderGame(makeStarted({ recentPlays: tenPlays }), { layout: "wide" })
-      );
+      const out = strip(renderGame(makeStarted({ recentPlays: tenPlays }), { layout: "wide" }));
       expect(out).toContain("p0");
       expect(out).toContain("p6");
       expect(out).not.toContain("p7");

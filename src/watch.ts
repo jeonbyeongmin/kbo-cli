@@ -1,7 +1,7 @@
 import { fetchRelay, fetchSchedule, isPlayable, normalize, todayDate } from "./api.ts";
 import {
-  detectColumns,
   type LayoutMode,
+  detectColumns,
   onResize,
   pickLayoutMode,
   recentViewportForMode,
