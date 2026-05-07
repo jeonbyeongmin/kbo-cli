@@ -360,6 +360,14 @@ interface RenderCtx {
   mode: LayoutMode;
   innerWidth: number;
   rightInner?: number;
+  historyOffset: number;
+  recentViewport: number;
+}
+
+function recentSectionHeader(offset: number, viewport: number, total: number): string {
+  if (offset <= 0) return pc.dim("  ─ 최근 플레이 ─");
+  const remaining = Math.max(0, total - viewport - offset);
+  return pc.dim(`  ─ 히스토리 ▲${remaining} ─`);
 }
 
 function renderStartedBodyWide(game: NormalizedGame, ctx: RenderCtx, rightInner: number): string[] {
@@ -395,8 +403,9 @@ function renderStartedBodyWide(game: NormalizedGame, ctx: RenderCtx, rightInner:
   }
   right.push("");
   if (game.recentPlays.length > 0) {
-    right.push(pc.dim("  ─ 최근 플레이 ─"));
-    for (const p of game.recentPlays.slice(0, 7)) {
+    const { recentViewport: viewport, historyOffset: offset } = ctx;
+    right.push(recentSectionHeader(offset, viewport, game.recentPlays.length));
+    for (const p of game.recentPlays.slice(offset, offset + viewport)) {
       right.push(trimToWidth(`  • ${p}`, rightInner));
     }
   }
@@ -447,9 +456,9 @@ function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): string[] {
   }
 
   if (game.recentPlays.length > 0) {
-    body.push(pc.dim("  ─ 최근 플레이 ─"));
-    const limit = compact ? 3 : 5;
-    for (const p of game.recentPlays.slice(0, limit)) {
+    const { recentViewport: viewport, historyOffset: offset } = ctx;
+    body.push(recentSectionHeader(offset, viewport, game.recentPlays.length));
+    for (const p of game.recentPlays.slice(offset, offset + viewport)) {
       body.push(`  • ${trimToWidth(p, ctx.innerWidth - 4)}`);
     }
   }
@@ -620,9 +629,20 @@ const BODY_RENDERERS: Record<GameStatus, (g: NormalizedGame, ctx: RenderCtx) => 
   SUSPENDED: renderReadyBody,
 };
 
+export function recentViewportForMode(mode: LayoutMode): number {
+  if (mode === "wide") return 7;
+  if (mode === "compact") return 3;
+  return 5;
+}
+
 export function renderGame(
   game: NormalizedGame,
-  opts: { staleSec?: number; multiGame?: boolean; layout?: LayoutMode | "auto" } = {}
+  opts: {
+    staleSec?: number;
+    multiGame?: boolean;
+    layout?: LayoutMode | "auto";
+    historyOffset?: number;
+  } = {}
 ): string {
   const stale = opts.staleSec ?? 0;
   const cols = detectColumns();
@@ -633,7 +653,12 @@ export function renderGame(
   const staleTag = stale > 0 ? pc.yellow(` ⚠ stale ${stale}s`) : "";
   const title = `KBO LIVE · ${headerStatus}${venue}${staleTag}`;
 
-  const ctx: RenderCtx = { mode, innerWidth };
+  const ctx: RenderCtx = {
+    mode,
+    innerWidth,
+    historyOffset: opts.historyOffset ?? 0,
+    recentViewport: recentViewportForMode(mode),
+  };
   if (mode === "wide") {
     ctx.rightInner = wideColumnWidths(innerWidth).right;
   }

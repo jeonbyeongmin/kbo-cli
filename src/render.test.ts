@@ -98,3 +98,66 @@ describe("renderGame STARTED 카운트 위치", () => {
     expect(out).toMatch(/B .*S .*O /);
   });
 });
+
+describe("renderGame STARTED 최근 플레이 historyOffset", () => {
+  const tenPlays = Array.from({ length: 10 }, (_, i) => `p${i}`);
+
+  test("offset 0 이면 ─ 최근 플레이 ─ 헤더 그대로", () => {
+    const out = strip(renderGame(makeStarted({ recentPlays: tenPlays }), { layout: "normal" }));
+    expect(out).toContain("최근 플레이");
+    expect(out).not.toContain("히스토리");
+  });
+
+  test("offset > 0 이면 헤더가 ─ 히스토리 ▲N ─ 로 교체", () => {
+    const out = strip(
+      renderGame(makeStarted({ recentPlays: tenPlays }), {
+        layout: "normal",
+        historyOffset: 1,
+      })
+    );
+    expect(out).toContain("히스토리");
+    expect(out).not.toContain("최근 플레이");
+    // total 10, viewport 5, offset 1 → N = 10 - 5 - 1 = 4
+    expect(out).toContain("▲4");
+  });
+
+  test("normal viewport 5 — offset 1 이면 plays[1..6] 가 보임", () => {
+    const out = strip(
+      renderGame(makeStarted({ recentPlays: tenPlays }), {
+        layout: "normal",
+        historyOffset: 1,
+      })
+    );
+    expect(out).toContain("p1");
+    expect(out).toContain("p5");
+    expect(out).not.toContain("p0");
+    expect(out).not.toContain("p6");
+  });
+
+  test("wide viewport 7 — offset 0 이면 plays[0..7] 가 보임", () => {
+    const prevCols = process.env.COLUMNS;
+    process.env.COLUMNS = "140";
+    try {
+      const out = strip(renderGame(makeStarted({ recentPlays: tenPlays }), { layout: "wide" }));
+      expect(out).toContain("p0");
+      expect(out).toContain("p6");
+      expect(out).not.toContain("p7");
+    } finally {
+      if (prevCols === undefined) Reflect.deleteProperty(process.env, "COLUMNS");
+      else process.env.COLUMNS = prevCols;
+    }
+  });
+
+  test("compact viewport 3 — offset 2 이면 plays[2..5] 가 보임", () => {
+    const out = strip(
+      renderGame(makeStarted({ recentPlays: tenPlays }), {
+        layout: "compact",
+        historyOffset: 2,
+      })
+    );
+    expect(out).toContain("p2");
+    expect(out).toContain("p4");
+    expect(out).not.toContain("p1");
+    expect(out).not.toContain("p5");
+  });
+});
