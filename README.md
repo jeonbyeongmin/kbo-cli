@@ -66,7 +66,7 @@ bun run build                            # → dist/kbo.js
 | `q`         | 종료                                                                          |
 | `r`         | 즉시 새로고침                                                                 |
 | `←` `→`     | watch: 진행중 경기 전환 · stats: 정렬/카테고리 전환 · config: 값 변경         |
-| `↑` `↓`     | stats 순위: 뷰(기본/공격/수비) · stats 리더보드: 행 스크롤 · config: 항목 이동 |
+| `↑` `↓`     | watch: 중계 영역 스크롤백 · stats 순위: 뷰(기본/공격/수비) · stats 리더보드: 행 스크롤 · config: 항목 이동 |
 | `h` `l`     | stats: 컬럼 가로 스크롤 (좁은 폭에서 ◂/▸ 표시 시)                              |
 | `t`         | stats 리더보드: 팀 필터 cycling (전체 ↔ 각 팀)                                |
 | `s` `Enter` | config: 저장 후 종료                                                          |
