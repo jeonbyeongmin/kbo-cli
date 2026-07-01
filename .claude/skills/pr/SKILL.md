@@ -1,6 +1,6 @@
 ---
 name: pr
-description: kbo-cli 의 작업 브랜치에서 develop 으로 향하는 새 PR 을 만든다. 단순 push+gh pr create 가 아니라, /simplify 로 코드 정리 → biome check (format+lint) → tsc typecheck → bun build → bun test 5단계 검증을 통과시킨 뒤에 PR 을 올린다. PR 제목·본문은 모두 한국어 Angular 컨벤션 (CLAUDE.md 참조). 사용자가 "PR 올려줘", "pull request 만들어줘", "PR 생성해줘", "이거 PR 로 정리해줘", "리뷰 받게 올려줘" 같은 PR 생성 의도를 보이거나, 기능 작업이 끝나서 머지 흐름을 시작하려는 맥락이면 반드시 이 스킬을 쓴다. push 만 하고 끝나는 단순 push 요청과 다르다 — push 직전에 검증을 강제하는 게 핵심이다.
+description: kbo-cli 의 작업 브랜치에서 develop 으로 향하는 새 PR 을 만든다. 단순 push+gh pr create 가 아니라, /code-review 로 diff 검토 → biome check (format+lint) → tsc typecheck → bun build → bun test 5단계 검증을 통과시킨 뒤에 PR 을 올린다. PR 제목·본문은 모두 한국어 Angular 컨벤션 (CLAUDE.md 참조). 사용자가 "PR 올려줘", "pull request 만들어줘", "PR 생성해줘", "이거 PR 로 정리해줘", "리뷰 받게 올려줘" 같은 PR 생성 의도를 보이거나, 기능 작업이 끝나서 머지 흐름을 시작하려는 맥락이면 반드시 이 스킬을 쓴다. push 만 하고 끝나는 단순 push 요청과 다르다 — push 직전에 검증을 강제하는 게 핵심이다.
 ---
 
 # /pr
@@ -30,19 +30,19 @@ description: kbo-cli 의 작업 브랜치에서 develop 으로 향하는 새 PR 
     - 동의 → 변경 성격을 보고 Angular 타입을 추론해 한 줄 한국어 메시지로 커밋 (예: `feat(watch): 진행중 경기 좌우 전환`). scope 모호하면 생략.
     - 거부 → 중단.
 
-### 2. /simplify 호출
+### 2. /code-review --fix 호출
 
-Skill 도구로 `simplify` 스킬을 호출해, develop..HEAD 에서 변경된 코드의 단순화·중복 제거·효율 개선을 수행한다. /simplify 가 실제로 파일을 수정했다면:
+Skill 도구로 `code-review` 스킬을 `--fix` 로 호출해, `develop..HEAD` diff 를 correctness 버그 관점에서 검토하고 findings 를 워킹 트리에 바로 반영한다 (effort 는 low/medium — 고신뢰 findings 위주). /code-review 가 실제로 파일을 수정했다면:
 
 ```bash
 git diff --stat
 git add -u
-git commit -m "refactor: /simplify 결과 반영"
+git commit -m "fix: /code-review 결과 반영"
 ```
 
-scope 가 명확하면 `refactor(<scope>): /simplify 결과 반영` 형태로. 변경이 없으면 커밋 없이 다음 단계로.
+scope 가 명확하면 `fix(<scope>): /code-review 결과 반영` 형태로. 수정이 없으면 커밋 없이 다음 단계로. 어떤 findings 가 반영됐는지는 §8 보고에 요약한다.
 
-> 사용자가 "정리 커밋 없이 그대로 가고 싶다" 고 미리 요청했다면 이 단계를 건너뛴다. 이후 단계(검증)는 그래도 모두 실행한다.
+> 사용자가 "리뷰 없이 그대로 올려줘" 라고 미리 요청했다면 이 단계를 건너뛴다. 이후 단계(검증)는 그래도 모두 실행한다.
 
 ### 3. 코드 검증
 
@@ -149,14 +149,15 @@ EOF
 
 다음을 한 번에 정리:
 
-- 거친 검증 단계와 각각의 결과 (✓ check, ✓ typecheck, ✓ build, ✓ test)
-- 스킬이 만든 추가 커밋 목록 (`refactor: /simplify ...`, `style: biome check ...` 등)
+- 거친 검증 단계와 각각의 결과 (✓ code-review, ✓ check, ✓ typecheck, ✓ build, ✓ test)
+- /code-review 가 --fix 로 반영한 findings 요약 (있었으면)
+- 스킬이 만든 추가 커밋 목록 (`fix: /code-review 결과 반영`, `style: biome check 자동 수정` 등)
 - push 한 브랜치 이름과 upstream
 - 생성된 PR URL (또는 이미 열려있던 PR URL)
 
 ## 주의사항
 
-- **/simplify 와 biome check 가 만드는 추가 커밋은 PR diff 를 어지럽힐 수 있다.** 사용자가 "정리 커밋 없이 가고 싶다" 고 미리 말했으면 §2 와 §3 의 자동 수정 단계를 건너뛴다 — 단, typecheck/build/test 는 반드시 통과해야 PR 을 만든다 (검증 자체를 건너뛰지는 않는다).
+- **/code-review --fix 와 biome check 가 만드는 자동 수정 커밋은 PR diff 를 어지럽힐 수 있다.** 사용자가 "자동 수정 커밋 없이 가고 싶다" 고 미리 말했으면 §2 와 §3 의 자동 수정 단계를 건너뛴다 — 단, typecheck/build/test 는 반드시 통과해야 PR 을 만든다 (검증 자체를 건너뛰지는 않는다).
 - biome 이 처음 적용되는 PR 은 포매팅 변경이 광범위할 수 있다. 첫 PR 에서는 검증 커밋이 큰 게 정상 — 사용자에게 미리 알린다.
 - 작업 브랜치가 origin 에 없을 수 있다. 첫 push 는 `-u origin <branch>` 로 upstream 을 만들어 둔다.
 - PR 본문에 본인이 만든 커밋 SHA 를 나열하지 않는다 — gh 가 자동으로 commits 탭에 보여주고, 본문 중복은 노이즈다.
