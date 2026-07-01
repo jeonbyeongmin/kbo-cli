@@ -51,6 +51,73 @@ export function colorTeam(name: string): string {
   return fn ? fn(pc.bold(display)) : pc.bold(display);
 }
 
+// 팀 hex 를 전경색으로 쓰되, 검정(KT)·남색(두산)처럼 어두운 팀은 채도를 유지한
+// 채 최대 채널을 150 이상으로 끌어올려 어두운 터미널 배경에서도 보이게 한다.
+function brightHex(hex: string): [number, number, number] {
+  let r = Number.parseInt(hex.slice(1, 3), 16);
+  let g = Number.parseInt(hex.slice(3, 5), 16);
+  let b = Number.parseInt(hex.slice(5, 7), 16);
+  const max = Math.max(r, g, b);
+  if (max === 0) return [150, 150, 150]; // 순수 검정 → 회색
+  if (max < 150) {
+    const f = 150 / max;
+    r = Math.round(r * f);
+    g = Math.round(g * f);
+    b = Math.round(b * f);
+  }
+  return [r, g, b];
+}
+
+// 팀 컬러 전경 (truecolor). 대형 숫자·강조에 사용.
+function teamFg(name: string): (s: string) => string {
+  const hex = TEAM_HEX[name];
+  if (!hex || !pc.isColorSupported) return (s) => s;
+  const [r, g, b] = brightHex(hex);
+  const open = `\x1b[38;2;${r};${g};${b}m`;
+  return (s) => `${open}${s}\x1b[39m`;
+}
+
+// 솔리드 컬러 배너. 팀 식별색을 배경으로 깔아 스코어보드 상단 라벨로 쓴다.
+function teamBanner(name: string): string {
+  const display = TEAM_DISPLAY[name] ?? name;
+  const fn = TEAM_COLOR[name];
+  const label = ` ${display} `;
+  return fn ? fn(pc.bold(label)) : pc.bold(`▐${label}▌`);
+}
+
+// 5행 3열 블록 숫자 폰트. 실제 전광판 느낌의 대형 점수 렌더용.
+const BIG_FONT: Record<string, string[]> = {
+  "0": ["███", "█ █", "█ █", "█ █", "███"],
+  "1": [" █ ", "██ ", " █ ", " █ ", "███"],
+  "2": ["███", "  █", "███", "█  ", "███"],
+  "3": ["███", "  █", "███", "  █", "███"],
+  "4": ["█ █", "█ █", "███", "  █", "  █"],
+  "5": ["███", "█  ", "███", "  █", "███"],
+  "6": ["███", "█  ", "███", "█ █", "███"],
+  "7": ["███", "  █", "  █", "  █", "  █"],
+  "8": ["███", "█ █", "███", "█ █", "███"],
+  "9": ["███", "█ █", "███", "  █", "███"],
+  " ": ["   ", "   ", "   ", "   ", "   "],
+};
+
+// 정수를 5행 블록 숫자로. 각 자리 3폭 + 자리 사이 1칸 공백.
+export function bigDigits(n: number, color: (s: string) => string): string[] {
+  const s = String(n);
+  const rows = ["", "", "", "", ""];
+  for (let ci = 0; ci < s.length; ci++) {
+    const glyph = BIG_FONT[s[ci]!] ?? BIG_FONT[" "]!;
+    for (let i = 0; i < 5; i++) rows[i] += (ci > 0 ? " " : "") + glyph[i];
+  }
+  return rows.map((r) => color(r));
+}
+
+function centerAlign(s: string, width: number): string {
+  const w = visualWidth(s);
+  if (w >= width) return s;
+  const left = Math.floor((width - w) / 2);
+  return " ".repeat(left) + s + " ".repeat(width - w - left);
+}
+
 // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences require \x1b
 const ANSI_ESC = /\x1b\[[0-9;]*m/;
 const ANSI_RE = new RegExp(ANSI_ESC.source, "g");
@@ -238,6 +305,93 @@ export function inningLabel(inning: number, topBottom: "top" | "bottom"): string
   return `${inning}회${topBottom === "top" ? "초" : "말"}`;
 }
 
+// 대형 스코어보드 헤더 (normal/wide). 좌=원정 대형 숫자, 우=홈 대형 숫자,
+// 가운데=경기 상태(이닝/공격/아웃 등). 배너 1줄 + 숫자 5줄 = 6줄 반환.
+function scoreHeaderBig(
+  awayName: string,
+  homeName: string,
+  awayScore: number,
+  homeScore: number,
+  centerLines: string[],
+  innerWidth: number,
+  opts: { awayTag?: string; homeTag?: string } = {}
+): string[] {
+  const awayBig = bigDigits(awayScore, teamFg(awayName));
+  const homeBig = bigDigits(homeScore, teamFg(homeName));
+
+  // 좌/우 존은 대칭, 가운데는 나머지. 좁은 normal 에서도 최소 폭 확보.
+  const side = Math.min(22, Math.max(12, Math.floor((innerWidth - 16) / 2)));
+  const center = Math.max(10, innerWidth - side * 2);
+
+  const awayTag = opts.awayTag ?? pc.dim("원정");
+  const homeTag = opts.homeTag ?? pc.dim("홈");
+  const bannerRight = `${homeTag} ${teamBanner(homeName)}`;
+  const bannerLeft = `  ${teamBanner(awayName)} ${awayTag}`;
+  const bannerRow = padEnd(bannerLeft, innerWidth - visualWidth(bannerRight)) + bannerRight;
+
+  const rows = [bannerRow];
+  for (let i = 0; i < 5; i++) {
+    // 원정 숫자는 가운데 쪽으로 우측정렬, 홈 숫자는 가운데 쪽으로 좌측정렬 —
+    // 실제 전광판처럼 두 점수가 가운데를 마주보게.
+    const leftCell = padEnd(padStart(awayBig[i]!, side - 3), side);
+    const rightCell = padStart(padEnd(homeBig[i]!, side - 3), side);
+    const centerCell = centerAlign(centerLines[i] ?? "", center);
+    rows.push(leftCell + centerCell + rightCell);
+  }
+  return rows;
+}
+
+// compact 헤더: 배너 + 한 줄 점수. 대형 숫자는 좁은 폭에 안 맞아 생략.
+function scoreHeaderCompact(
+  awayName: string,
+  homeName: string,
+  awayScore: number,
+  homeScore: number,
+  awaySuffix = "",
+  homeSuffix = ""
+): string[] {
+  const bw = Math.max(visualWidth(teamBanner(awayName)), visualWidth(teamBanner(homeName)));
+  const row = (name: string, score: number, suffix: string) =>
+    `  ${padEnd(teamBanner(name), bw)}  ${teamFg(name)(pc.bold(String(score).padStart(2)))}${suffix}`;
+  return [row(awayName, awayScore, awaySuffix), row(homeName, homeScore, homeSuffix)];
+}
+
+// STARTED 가운데 열: 이닝 / 공격 방향 / 아웃카운트를 세로로.
+function startedCenterLines(game: NormalizedGame): string[] {
+  const inning = pc.bold(inningLabel(game.inning, game.topBottom));
+  const attack = game.topBottom === "top" ? pc.cyan("◀ 공격") : pc.cyan("공격 ▶");
+  const outs = `${pc.red("●".repeat(game.out))}${pc.dim("○".repeat(Math.max(0, 3 - game.out)))} ${pc.dim(`${game.out}아웃`)}`;
+  return ["", inning, attack, outs, ""];
+}
+
+// 미니 박스 패널. wide 우측 컬럼의 타자/투수 카드용.
+function panel(title: string, body: string[], width: number): string[] {
+  const inner = width - 2;
+  const titleStr = ` ${title} `;
+  const top = `┌─${titleStr}${"─".repeat(Math.max(0, inner - visualWidth(titleStr) - 1))}┐`;
+  const out = [top];
+  for (const line of body) out.push(`│ ${padEnd(trimToWidth(line, inner - 2), inner - 2)} │`);
+  out.push(`└${"─".repeat(inner)}┘`);
+  return out;
+}
+
+// 이닝별 득점을 막대 스파크라인으로. 0=바닥 점, 1~=높이 증가.
+const BAR_STEPS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+function inningBars(runs: string[], color: (s: string) => string): string {
+  // 각 셀을 2폭으로 맞춰 위쪽 숫자 컬럼(padStart 2) 아래 정렬되게 한다.
+  return runs
+    .map((v) => {
+      if (v === "" || v === "-") return "  ";
+      const n = Number(v);
+      const glyph =
+        !Number.isFinite(n) || n <= 0
+          ? pc.dim("▁")
+          : color(BAR_STEPS[Math.min(n, BAR_STEPS.length - 1)]!);
+      return padStart(glyph, 2);
+    })
+    .join(" ");
+}
+
 function timeStr(ts: number): string {
   const d = new Date(ts);
   return d.toTimeString().slice(0, 8);
@@ -319,10 +473,6 @@ function filterResultHighlights(plays: string[]): string[] {
   return plays.filter((p) => !SIMPLE_COUNT_RE.test(p) && !RESULT_META_RE.test(p));
 }
 
-function teamScoreLine(name: string, score: number, suffix = ""): string {
-  return `  ${padEnd(colorTeam(name), 8)}  ${pc.bold(String(score).padStart(2))}${suffix}`;
-}
-
 function labelValueRows(rows: [string, string | null | undefined][]): string[] {
   return rows
     .filter(([, v]) => v != null && v !== "")
@@ -351,6 +501,13 @@ function inningLineSection(game: NormalizedGame, ctx: RenderCtx): string[] {
     out.push(`  ${pc.dim(padEnd("회", 6))} ${pc.dim(headerCells)}`);
     out.push(`  ${padEnd(game.awayTeamName, 6)} ${awaySlice}`);
     out.push(`  ${padEnd(game.homeTeamName, 6)} ${homeSlice}`);
+    // 득점 스파크라인 — 숫자 표 아래 팀 컬러 막대로 흐름을 한눈에.
+    if (ctx.mode !== "compact") {
+      const awayBar = inningBars(game.inningLine.away.slice(i, i + len), teamFg(game.awayTeamName));
+      const homeBar = inningBars(game.inningLine.home.slice(i, i + len), teamFg(game.homeTeamName));
+      out.push(`  ${padEnd("", 6)} ${awayBar}`);
+      out.push(`  ${padEnd("", 6)} ${homeBar}`);
+    }
     if (i + chunkSize < innings) out.push("");
   }
   return out;
@@ -370,20 +527,31 @@ function recentSectionHeader(offset: number, viewport: number, total: number): s
   return pc.dim(`  ─ 히스토리 ▲${remaining} ─`);
 }
 
+// 섹션 라인(첫 줄 "─ 타자 ─" 헤더)을 패널 본문으로 변환 — 헤더 제거 + 좌측 2칸 제거.
+function toPanelBody(sectionLines: string[]): string[] {
+  return sectionLines.slice(1).map((l) => l.replace(/^ {2}/, ""));
+}
+
+function recentPlayLines(game: NormalizedGame, ctx: RenderCtx, width: number): string[] {
+  if (game.recentPlays.length === 0) return [];
+  const { recentViewport: viewport, historyOffset: offset } = ctx;
+  const out = [recentSectionHeader(offset, viewport, game.recentPlays.length)];
+  for (const p of game.recentPlays.slice(offset, offset + viewport)) {
+    out.push(trimToWidth(`  ${pc.dim("▸")} ${p}`, width));
+  }
+  return out;
+}
+
 function renderStartedBodyWide(game: NormalizedGame, ctx: RenderCtx, rightInner: number): string[] {
   const left: string[] = [""];
   left.push(
-    teamScoreLine(
+    ...scoreHeaderBig(
       game.awayTeamName,
-      game.awayScore,
-      game.topBottom === "top" ? pc.cyan("  ◀ 공격") : ""
-    )
-  );
-  left.push(
-    teamScoreLine(
       game.homeTeamName,
+      game.awayScore,
       game.homeScore,
-      game.topBottom === "bottom" ? pc.cyan("  ◀ 공격") : ""
+      startedCenterLines(game),
+      WIDE_LEFT_INNER
     )
   );
   left.push("");
@@ -394,21 +562,15 @@ function renderStartedBodyWide(game: NormalizedGame, ctx: RenderCtx, rightInner:
   for (const ln of inningLines) left.push(ln);
 
   const right: string[] = [""];
-  for (const ln of renderBatterSection(game.batterStats, false)) {
-    right.push(trimToWidth(ln, rightInner));
-  }
+  right.push(
+    ...panel("타자", toPanelBody(renderBatterSection(game.batterStats, false)), rightInner)
+  );
   right.push("");
-  for (const ln of renderPitcherSection(game.pitcherStats, false)) {
-    right.push(trimToWidth(ln, rightInner));
-  }
+  right.push(
+    ...panel("투수", toPanelBody(renderPitcherSection(game.pitcherStats, false)), rightInner)
+  );
   right.push("");
-  if (game.recentPlays.length > 0) {
-    const { recentViewport: viewport, historyOffset: offset } = ctx;
-    right.push(recentSectionHeader(offset, viewport, game.recentPlays.length));
-    for (const p of game.recentPlays.slice(offset, offset + viewport)) {
-      right.push(trimToWidth(`  • ${p}`, rightInner));
-    }
-  }
+  for (const ln of recentPlayLines(game, ctx, rightInner)) right.push(ln);
   return joinColumns(left, right, WIDE_LEFT_INNER);
 }
 
@@ -418,27 +580,34 @@ function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): string[] {
   }
   const compact = ctx.mode === "compact";
   const body: string[] = [""];
-  body.push(
-    teamScoreLine(
-      game.awayTeamName,
-      game.awayScore,
-      game.topBottom === "top" ? pc.cyan("  ◀ 공격") : ""
-    )
-  );
-  body.push(
-    teamScoreLine(
-      game.homeTeamName,
-      game.homeScore,
-      game.topBottom === "bottom" ? pc.cyan("  ◀ 공격") : ""
-    )
-  );
-  body.push("");
 
   if (compact) {
+    body.push(
+      ...scoreHeaderCompact(
+        game.awayTeamName,
+        game.homeTeamName,
+        game.awayScore,
+        game.homeScore,
+        game.topBottom === "top" ? pc.cyan("  ◀") : "",
+        game.topBottom === "bottom" ? pc.cyan("  ◀") : ""
+      )
+    );
+    body.push("");
     body.push(`  ${compactDiamond(game.bases)}`);
     body.push(`  ${compactCountLine(game.ball, game.strike, game.out)}`);
     body.push("");
   } else {
+    body.push(
+      ...scoreHeaderBig(
+        game.awayTeamName,
+        game.homeTeamName,
+        game.awayScore,
+        game.homeScore,
+        startedCenterLines(game),
+        ctx.innerWidth - 2
+      )
+    );
+    body.push("");
     body.push(...diamondLines(game.bases));
     body.push(`  ${compactCountLine(game.ball, game.strike, game.out)}`);
     body.push("");
@@ -455,22 +624,32 @@ function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): string[] {
     body.push("");
   }
 
-  if (game.recentPlays.length > 0) {
-    const { recentViewport: viewport, historyOffset: offset } = ctx;
-    body.push(recentSectionHeader(offset, viewport, game.recentPlays.length));
-    for (const p of game.recentPlays.slice(offset, offset + viewport)) {
-      body.push(`  • ${trimToWidth(p, ctx.innerWidth - 4)}`);
-    }
-  }
+  for (const ln of recentPlayLines(game, ctx, ctx.innerWidth - 4)) body.push(ln);
   return body;
 }
 
+// RESULT 헤더용: 승/패/무 태그.
+function resultTags(game: NormalizedGame): { awayTag?: string; homeTag?: string } {
+  if (game.winner === "AWAY") return { awayTag: pc.yellow("★ 승"), homeTag: pc.dim("패") };
+  if (game.winner === "HOME") return { awayTag: pc.dim("패"), homeTag: pc.yellow("★ 승") };
+  if (game.winner === "DRAW") return { awayTag: pc.dim("무"), homeTag: pc.dim("무") };
+  return {};
+}
+const RESULT_CENTER = ["", "", pc.bold("경기 종료"), "", ""];
+
 function renderResultBodyWide(game: NormalizedGame, ctx: RenderCtx, rightInner: number): string[] {
   const left: string[] = [""];
-  const awayMark = game.winner === "AWAY" ? pc.yellow("  ★") : "";
-  const homeMark = game.winner === "HOME" ? pc.yellow("  ★") : "";
-  left.push(teamScoreLine(game.awayTeamName, game.awayScore, awayMark));
-  left.push(teamScoreLine(game.homeTeamName, game.homeScore, homeMark));
+  left.push(
+    ...scoreHeaderBig(
+      game.awayTeamName,
+      game.homeTeamName,
+      game.awayScore,
+      game.homeScore,
+      RESULT_CENTER,
+      WIDE_LEFT_INNER,
+      resultTags(game)
+    )
+  );
   left.push("");
   if (game.homeRheb && game.awayRheb) {
     left.push(pc.dim("  ─ 박스스코어 ─"));
@@ -504,7 +683,7 @@ function renderResultBodyWide(game: NormalizedGame, ctx: RenderCtx, rightInner: 
   if (highlights.length > 0) {
     right.push(pc.dim("  ─ 하이라이트 ─"));
     for (const p of highlights.slice(0, 10)) {
-      right.push(trimToWidth(`  • ${p}`, rightInner));
+      right.push(trimToWidth(`  ${pc.dim("▸")} ${p}`, rightInner));
     }
   }
   return joinColumns(left, right, WIDE_LEFT_INNER);
@@ -515,10 +694,30 @@ function renderResultBody(game: NormalizedGame, ctx: RenderCtx): string[] {
     return renderResultBodyWide(game, ctx, ctx.rightInner);
   }
   const body: string[] = [""];
-  const awayMark = game.winner === "AWAY" ? pc.yellow("  ★") : "";
-  const homeMark = game.winner === "HOME" ? pc.yellow("  ★") : "";
-  body.push(teamScoreLine(game.awayTeamName, game.awayScore, awayMark));
-  body.push(teamScoreLine(game.homeTeamName, game.homeScore, homeMark));
+  if (ctx.mode === "compact") {
+    body.push(
+      ...scoreHeaderCompact(
+        game.awayTeamName,
+        game.homeTeamName,
+        game.awayScore,
+        game.homeScore,
+        game.winner === "AWAY" ? pc.yellow("  ★") : "",
+        game.winner === "HOME" ? pc.yellow("  ★") : ""
+      )
+    );
+  } else {
+    body.push(
+      ...scoreHeaderBig(
+        game.awayTeamName,
+        game.homeTeamName,
+        game.awayScore,
+        game.homeScore,
+        RESULT_CENTER,
+        ctx.innerWidth - 2,
+        resultTags(game)
+      )
+    );
+  }
   body.push("");
 
   if (game.homeRheb && game.awayRheb) {
@@ -558,7 +757,7 @@ function renderResultBody(game: NormalizedGame, ctx: RenderCtx): string[] {
     body.push(pc.dim("  ─ 하이라이트 ─"));
     const limit = ctx.mode === "compact" ? 3 : 5;
     for (const p of highlights.slice(0, limit)) {
-      body.push(`  • ${trimToWidth(p, ctx.innerWidth - 4)}`);
+      body.push(`  ${pc.dim("▸")} ${trimToWidth(p, ctx.innerWidth - 6)}`);
     }
   }
   return body;
@@ -573,13 +772,38 @@ function readyInfoLines(game: NormalizedGame): string[] {
   ]);
 }
 
+// READY/BEFORE/CANCEL/SUSPENDED 가운데 열: 상태 + 시작 시각.
+function readyCenterLines(game: NormalizedGame): string[] {
+  const statusText =
+    game.status === "CANCEL"
+      ? pc.yellow("경기 취소")
+      : game.status === "SUSPENDED"
+        ? pc.yellow("경기 중단")
+        : pc.cyan("경기 전");
+  const time = game.gameDateTime ? game.gameDateTime.slice(11, 16) : "";
+  return ["", statusText, time ? pc.dim(time) : "", "", ""];
+}
+
+function readyHeader(game: NormalizedGame, innerWidth: number, compact: boolean): string[] {
+  if (compact) {
+    return scoreHeaderCompact(game.awayTeamName, game.homeTeamName, game.awayScore, game.homeScore);
+  }
+  return scoreHeaderBig(
+    game.awayTeamName,
+    game.homeTeamName,
+    game.awayScore,
+    game.homeScore,
+    readyCenterLines(game),
+    innerWidth
+  );
+}
+
 function renderReadyBody(game: NormalizedGame, ctx: RenderCtx): string[] {
   const infoLines = readyInfoLines(game);
   // wide 인데 우측 정보가 부족하면 normal 로 격하해 휑함을 피한다.
   if (ctx.mode === "wide" && ctx.rightInner != null && infoLines.length >= 3) {
     const left: string[] = [""];
-    left.push(teamScoreLine(game.awayTeamName, game.awayScore));
-    left.push(teamScoreLine(game.homeTeamName, game.homeScore));
+    left.push(...readyHeader(game, WIDE_LEFT_INNER, false));
     left.push("");
     if (game.awayStarter || game.homeStarter) {
       left.push(pc.dim("  ─ 선발 ─"));
@@ -587,14 +811,18 @@ function renderReadyBody(game: NormalizedGame, ctx: RenderCtx): string[] {
       left.push(`  ${padEnd(game.homeTeamName, 6)} ${game.homeStarter ?? pc.dim("미정")}`);
     }
     const right: string[] = [""];
-    right.push(pc.dim("  ─ 경기 정보 ─"));
-    for (const ln of infoLines) right.push(trimToWidth(ln, ctx.rightInner));
+    right.push(
+      ...panel(
+        "경기 정보",
+        infoLines.map((l) => l.replace(/^ {2}/, "")),
+        ctx.rightInner
+      )
+    );
     return joinColumns(left, right, WIDE_LEFT_INNER);
   }
 
   const body: string[] = [""];
-  body.push(teamScoreLine(game.awayTeamName, game.awayScore));
-  body.push(teamScoreLine(game.homeTeamName, game.homeScore));
+  body.push(...readyHeader(game, ctx.innerWidth - 2, ctx.mode === "compact"));
   body.push("");
 
   if (game.awayStarter || game.homeStarter) {
@@ -612,7 +840,8 @@ function renderReadyBody(game: NormalizedGame, ctx: RenderCtx): string[] {
 }
 
 const HEADER_LABEL: Record<GameStatus, (g: NormalizedGame) => string> = {
-  STARTED: (g) => `${inningLabel(g.inning, g.topBottom)} ${g.out}사`,
+  // STARTED 의 이닝/아웃은 대형 헤더 가운데로 옮겼으므로 타이틀엔 LIVE 태그만.
+  STARTED: () => pc.green("● LIVE"),
   RESULT: () => "경기 종료",
   READY: () => "경기 전",
   BEFORE: () => "경기 전",
@@ -651,7 +880,7 @@ export function renderGame(
   const headerStatus = HEADER_LABEL[game.status](game);
   const venue = game.stadium ? pc.dim(` · ${game.stadium}`) : "";
   const staleTag = stale > 0 ? pc.yellow(` ⚠ stale ${stale}s`) : "";
-  const title = `KBO LIVE · ${headerStatus}${venue}${staleTag}`;
+  const title = `KBO · ${headerStatus}${venue}${staleTag}`;
 
   const ctx: RenderCtx = {
     mode,
@@ -660,7 +889,9 @@ export function renderGame(
     recentViewport: recentViewportForMode(mode),
   };
   if (mode === "wide") {
-    ctx.rightInner = wideColumnWidths(innerWidth).right;
+    // frame() 의 내용 폭 예산은 innerWidth-2 (좌우 "│ " … " │" 인셋). 우측 컬럼을
+    // 꽉 채워 그리는 패널이 넘치지 않도록 2칸 보정한 buildable 폭을 넘긴다.
+    ctx.rightInner = wideColumnWidths(innerWidth).right - 2;
   }
   const body = BODY_RENDERERS[game.status](game, ctx);
 

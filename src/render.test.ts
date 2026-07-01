@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { compactCountLine, dots, renderGame } from "./render.ts";
+import { compactCountLine, dots, renderGame, visualWidth } from "./render.ts";
 import type { NormalizedGame } from "./types.ts";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences require \x1b
@@ -58,6 +58,71 @@ describe("compactCountLine", () => {
     expect(out).toContain("S");
     expect(out).toContain("O");
     expect(out).not.toContain("\n");
+  });
+});
+
+describe("renderGame 프레임 정사각 (모든 줄 동일 폭)", () => {
+  const frameLineWidths = (out: string): number[] =>
+    out
+      .split("\n")
+      .filter((l) => /^[┌│├└]/.test(strip(l)))
+      .map(visualWidth);
+
+  const COLS: Record<string, string> = { compact: "72", normal: "96", wide: "140" };
+
+  const scenarios: [string, Partial<NormalizedGame>][] = [
+    [
+      "STARTED",
+      {
+        status: "STARTED",
+        awayScore: 3,
+        homeScore: 12,
+        recentPlays: ["a", "b", "c"],
+        inningLine: { away: ["0", "3", "0"], home: ["1", "0", "-"] },
+      },
+    ],
+    [
+      "RESULT",
+      {
+        status: "RESULT",
+        awayScore: 5,
+        homeScore: 4,
+        winner: "AWAY",
+        homeRheb: { r: 4, h: 8, e: 0, b: 3 },
+        awayRheb: { r: 5, h: 9, e: 1, b: 2 },
+        inningLine: { away: ["0", "5"], home: ["4", "0"] },
+      },
+    ],
+    ["READY", { status: "READY", stadium: "잠실", weather: "맑음", broadChannel: "MBC" }],
+  ];
+
+  for (const [name, overrides] of scenarios) {
+    for (const layout of ["compact", "normal", "wide"] as const) {
+      test(`${name} · ${layout} — 프레임 줄 폭이 하나로 일치`, () => {
+        const prev = process.env.COLUMNS;
+        process.env.COLUMNS = COLS[layout];
+        try {
+          const out = renderGame(makeStarted(overrides), { layout });
+          const widths = new Set(frameLineWidths(out));
+          expect(widths.size).toBe(1);
+        } finally {
+          if (prev === undefined) Reflect.deleteProperty(process.env, "COLUMNS");
+          else process.env.COLUMNS = prev;
+        }
+      });
+    }
+  }
+
+  test("normal STARTED — 점수가 대형 블록 숫자(█)로 렌더", () => {
+    const prev = process.env.COLUMNS;
+    process.env.COLUMNS = "96";
+    try {
+      const out = renderGame(makeStarted({ awayScore: 3, homeScore: 1 }), { layout: "normal" });
+      expect(out).toContain("█");
+    } finally {
+      if (prev === undefined) Reflect.deleteProperty(process.env, "COLUMNS");
+      else process.env.COLUMNS = prev;
+    }
   });
 });
 
