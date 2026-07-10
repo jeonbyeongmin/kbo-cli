@@ -6,7 +6,7 @@ import {
   onResize,
   pickLayoutMode,
   recentViewportForMode,
-  renderGame,
+  renderGameFrame,
 } from "./render.ts";
 import type { NormalizedGame, ScheduleGame, TextRelayData } from "./types.ts";
 
@@ -107,13 +107,15 @@ export async function watch(opts: WatchOptions): Promise<void> {
     }
   };
 
+  // 마지막 draw 에서 실제 적용된 viewport — 높이에 따라 매 프레임 달라질 수 있다.
+  let lastViewport = recentViewportFor(opts.layout);
+
   const setHistoryOffset = (next: number) => {
     if (!lastGame || lastGame.status !== "STARTED") {
       historyOffset = 0;
       return;
     }
-    const viewport = recentViewportFor(opts.layout);
-    const maxOffset = Math.max(0, lastGame.recentPlays.length - viewport);
+    const maxOffset = Math.max(0, lastGame.recentPlays.length - lastViewport);
     historyOffset = Math.max(0, Math.min(next, maxOffset));
   };
 
@@ -203,13 +205,15 @@ export async function watch(opts: WatchOptions): Promise<void> {
       // RESULT/READY/BEFORE/SUSPENDED 는 변할 일이 거의 없어 stale 경고가 의미 없음 — STARTED 만 표시.
       const stale = Math.floor((Date.now() - lastFetch) / 1000);
       const isLive = lastGame.status === "STARTED";
-      body = renderGame(lastGame, {
+      const frame = renderGameFrame(lastGame, {
         staleSec: isLive && stale > staleThreshold ? stale : 0,
         multiGame: liveGames.length > 1,
         layout: opts.layout,
         historyOffset,
         anim: currentAnim(),
       });
+      body = frame.text;
+      lastViewport = frame.recentViewport || lastViewport;
     } else if (lastError) {
       body = `\n  ${lastError}\n`;
     } else {

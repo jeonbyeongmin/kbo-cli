@@ -52,6 +52,7 @@ async function main(): Promise<void> {
   let statusOverride: GameStatus | null = null;
   let staleSec = 0;
   let historyOffset = 0;
+  let rows: number | undefined; // 높이 예산 강제 (높이 인지 레이아웃 검증용)
   // 애니메이션 프레임 강제 (라이브 없이 모션 렌더 검증용).
   const anim: RenderAnim = {};
   const paths: string[] = [];
@@ -61,6 +62,7 @@ async function main(): Promise<void> {
     if (a === "--status") statusOverride = argv[++i] as GameStatus;
     else if (a === "--stale") staleSec = Number(argv[++i] ?? 0);
     else if (a === "--history") historyOffset = Number(argv[++i] ?? 0);
+    else if (a === "--rows") rows = Number(argv[++i]) || undefined;
     else if (a === "--pulse") anim.pulse = Number(argv[++i] ?? 0);
     else if (a === "--flash") {
       // --flash away[:level]  (level 기본 1)
@@ -76,7 +78,7 @@ async function main(): Promise<void> {
       });
     } else if (a === "-h" || a === "--help") {
       console.log(
-        "usage: render-fixture.ts [path...] [--status <code>] [--stale <sec>] [--history <offset>] [--pulse <0..1>] [--flash <away|home>[:level]] [--runner <base>:<t>]"
+        "usage: render-fixture.ts [path...] [--status <code>] [--stale <sec>] [--history <offset>] [--rows <n>] [--pulse <0..1>] [--flash <away|home>[:level]] [--runner <base>:<t>]"
       );
       return;
     } else paths.push(a);
@@ -89,7 +91,7 @@ async function main(): Promise<void> {
     const ng = normalize(sched, fx.relay);
     process.stdout.write(`\n\x1b[2m# ${label}  (captured ${fx.capturedAt})\x1b[22m\n`);
     process.stdout.write(
-      `${renderGame(ng, { staleSec, historyOffset, anim: hasAnim ? anim : undefined })}\n`
+      `${renderGame(ng, { staleSec, historyOffset, rows, anim: hasAnim ? anim : undefined })}\n`
     );
   }
 }

@@ -137,6 +137,103 @@ export function detectColumns(): number {
   return 80;
 }
 
+// 높이 감지. 0 = 높이 무제한 (파이프/CI/테스트) — 이때 렌더는 기존과 동일하게 동작한다.
+export function detectRows(): number {
+  const r = process.stdout.rows;
+  if (typeof r === "number" && r > 0) return r;
+  const env = Number(process.env.LINES);
+  if (Number.isFinite(env) && env > 0) return env;
+  return 0;
+}
+
+// ─── 높이 인지 조립 ─────────────────────────────────────────────
+// 본문을 섹션 단위로 만들고 fitBody 가 터미널 높이 예산에 맞춘다.
+// alt 는 1단계 축소형. degradeOrder 에 같은 id 가 다시 오면 통째 생략.
+interface Section {
+  id: string;
+  lines: string[];
+  alt?: string[];
+}
+
+// 최근 플레이(또는 하이라이트)는 유일한 가변 높이 섹션 — 남는 세로 공간을 흡수한다.
+interface FlexSection {
+  min: number;
+  base: number; // 높이 무제한(비 TTY)일 때의 기존 기본 viewport
+  max: number;
+  render: (viewport: number) => string[];
+}
+
+function fitBody(
+  sections: Section[],
+  budget: number,
+  flex: FlexSection | null,
+  degradeOrder: string[]
+): { lines: string[]; viewport: number } {
+  const state = new Map<string, "alt" | "omit">();
+  let stripGaps = false;
+
+  const build = (viewport: number): string[] => {
+    const out: string[] = [];
+    for (const s of sections) {
+      let ls: string[];
+      if (s.id === "recent") ls = flex && viewport > 0 ? flex.render(viewport) : [];
+      else {
+        const st = state.get(s.id);
+        ls = st === "omit" ? [] : st === "alt" && s.alt ? s.alt : s.lines;
+      }
+      if (stripGaps) ls = ls.filter((l) => l.trim() !== "");
+      out.push(...ls);
+    }
+    if (!stripGaps && state.size === 0) return out; // 무강등 — 기존 출력 그대로
+    // 강등으로 생긴 연속/말단 빈 줄 정리 (선두 패딩 빈 줄은 유지)
+    const cleaned: string[] = [];
+    for (const l of out) {
+      const blank = l.trim() === "";
+      if (blank && cleaned.length > 0 && cleaned[cleaned.length - 1]!.trim() === "") continue;
+      cleaned.push(l);
+    }
+    while (cleaned.length > 1 && cleaned[cleaned.length - 1]!.trim() === "") cleaned.pop();
+    return cleaned;
+  };
+
+  if (!Number.isFinite(budget)) {
+    const v = flex ? Math.min(flex.base, flex.max) : 0;
+    return { lines: build(v), viewport: v };
+  }
+
+  const tryFit = (): { lines: string[]; viewport: number } | null => {
+    if (!flex) {
+      const lines = build(0);
+      return lines.length <= budget ? { lines, viewport: 0 } : null;
+    }
+    for (let v = Math.min(flex.max, budget); v >= flex.min; v--) {
+      const lines = build(v);
+      if (lines.length <= budget) return { lines, viewport: v };
+    }
+    return null;
+  };
+
+  let res = tryFit();
+  if (!res) {
+    for (const step of ["gaps", ...degradeOrder]) {
+      if (step === "gaps") stripGaps = true;
+      else {
+        const s = sections.find((x) => x.id === step);
+        if (!s) continue;
+        state.set(step, s.alt && state.get(step) == null ? "alt" : "omit");
+      }
+      res = tryFit();
+      if (res) break;
+    }
+  }
+  if (!res) {
+    // 최후 수단: 최소 구성으로 조립 후 하드 트림 (터미널이 극단적으로 낮을 때)
+    const v = flex ? flex.min : 0;
+    res = { lines: build(v).slice(0, Math.max(1, budget)), viewport: v };
+  }
+  return res;
+}
+
 export function pickLayoutMode(cols: number, override?: LayoutMode | "auto"): LayoutMode {
   if (override === "compact" || override === "normal" || override === "wide") {
     if (override === "wide") {
@@ -524,9 +621,14 @@ function labelValueRows(rows: [string, string | null | undefined][]): string[] {
     .map(([label, value]) => `  ${padEnd(pc.dim(label), NAME_COL)}  ${value}`);
 }
 
-function inningLineSection(game: NormalizedGame, ctx: RenderCtx): string[] {
+function inningLineSection(
+  game: NormalizedGame,
+  ctx: RenderCtx,
+  opts: { sparkline?: boolean } = {}
+): string[] {
   if (game.inningLine.away.length === 0) return [];
   const innings = game.inningLine.away.length;
+  const sparkline = opts.sparkline ?? ctx.mode !== "compact";
   // compact 에선 4회 단위로 줄바꿈해 좁은 폭에서도 정렬 유지.
   const chunkSize = ctx.mode === "compact" ? 4 : innings;
   const out: string[] = [];
@@ -547,7 +649,7 @@ function inningLineSection(game: NormalizedGame, ctx: RenderCtx): string[] {
     out.push(`  ${padEnd(game.awayTeamName, 6)} ${awaySlice}`);
     out.push(`  ${padEnd(game.homeTeamName, 6)} ${homeSlice}`);
     // 득점 스파크라인 — 숫자 표 아래 팀 컬러 막대로 흐름을 한눈에.
-    if (ctx.mode !== "compact") {
+    if (sparkline) {
       const awayBar = inningBars(game.inningLine.away.slice(i, i + len), teamFg(game.awayTeamName));
       const homeBar = inningBars(game.inningLine.home.slice(i, i + len), teamFg(game.homeTeamName));
       out.push(`  ${padEnd("", 6)} ${awayBar}`);
@@ -563,7 +665,8 @@ interface RenderCtx {
   innerWidth: number;
   rightInner?: number;
   historyOffset: number;
-  recentViewport: number;
+  recentViewport: number; // 높이 무제한일 때의 기본(base) viewport
+  bodyBudget: number; // 본문에 허용된 줄 수 (Infinity = 무제한)
   anim?: RenderAnim;
 }
 
@@ -578,9 +681,14 @@ function toPanelBody(sectionLines: string[]): string[] {
   return sectionLines.slice(1).map((l) => l.replace(/^ {2}/, ""));
 }
 
-function recentPlayLines(game: NormalizedGame, ctx: RenderCtx, width: number): string[] {
+function recentPlayLines(
+  game: NormalizedGame,
+  ctx: RenderCtx,
+  width: number,
+  viewport: number
+): string[] {
   if (game.recentPlays.length === 0) return [];
-  const { recentViewport: viewport, historyOffset: offset } = ctx;
+  const offset = ctx.historyOffset;
   const out = [recentSectionHeader(offset, viewport, game.recentPlays.length)];
   for (const p of game.recentPlays.slice(offset, offset + viewport)) {
     out.push(trimToWidth(`  ${pc.dim("▸")} ${p}`, width));
@@ -588,92 +696,156 @@ function recentPlayLines(game: NormalizedGame, ctx: RenderCtx, width: number): s
   return out;
 }
 
-function renderStartedBodyWide(game: NormalizedGame, ctx: RenderCtx, rightInner: number): string[] {
-  const left: string[] = [""];
-  left.push(
-    ...scoreHeaderBig(
-      game.awayTeamName,
-      game.homeTeamName,
-      game.awayScore,
-      game.homeScore,
-      startedCenterLines(game),
-      WIDE_LEFT_INNER,
-      { flash: ctx.anim?.flash }
-    )
-  );
-  left.push("");
-  left.push(...diamondField(game.bases, ctx.anim));
-  left.push(`  ${compactCountLine(game.ball, game.strike, game.out)}`);
-  left.push("");
-  const inningLines = inningLineSection(game, { ...ctx, mode: "normal" });
-  for (const ln of inningLines) left.push(ln);
-
-  const right: string[] = [""];
-  right.push(
-    ...panel("타자", toPanelBody(renderBatterSection(game.batterStats, false)), rightInner)
-  );
-  right.push("");
-  right.push(
-    ...panel("투수", toPanelBody(renderPitcherSection(game.pitcherStats, false)), rightInner)
-  );
-  right.push("");
-  for (const ln of recentPlayLines(game, ctx, rightInner)) right.push(ln);
-  return joinColumns(left, right, WIDE_LEFT_INNER);
+// 최근 플레이 flex 섹션 — 남는 세로 공간을 흡수한다.
+function recentFlex(game: NormalizedGame, ctx: RenderCtx, width: number): FlexSection | null {
+  if (game.recentPlays.length === 0) return null;
+  const available = Math.max(0, game.recentPlays.length - ctx.historyOffset);
+  return {
+    min: Math.min(2, Math.max(1, available)),
+    base: ctx.recentViewport,
+    max: Math.max(1, available),
+    render: (v) => ["", ...recentPlayLines(game, ctx, width, v)],
+  };
 }
 
-function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): string[] {
+type FittedBody = { lines: string[]; viewport: number };
+
+function renderStartedBodyWide(
+  game: NormalizedGame,
+  ctx: RenderCtx,
+  rightInner: number
+): FittedBody {
+  const leftSections: Section[] = [
+    {
+      id: "header",
+      lines: [
+        "",
+        ...scoreHeaderBig(
+          game.awayTeamName,
+          game.homeTeamName,
+          game.awayScore,
+          game.homeScore,
+          startedCenterLines(game),
+          WIDE_LEFT_INNER,
+          { flash: ctx.anim?.flash }
+        ),
+      ],
+    },
+    {
+      id: "diamond",
+      lines: [
+        "",
+        ...diamondField(game.bases, ctx.anim),
+        `  ${compactCountLine(game.ball, game.strike, game.out)}`,
+      ],
+      alt: [
+        "",
+        `  ${compactDiamond(game.bases)}`,
+        `  ${compactCountLine(game.ball, game.strike, game.out)}`,
+      ],
+    },
+    {
+      id: "inning",
+      lines: prefixGap(inningLineSection(game, { ...ctx, mode: "normal" })),
+      alt: prefixGap(inningLineSection(game, { ...ctx, mode: "normal" }, { sparkline: false })),
+    },
+  ];
+  const rightSections: Section[] = [
+    {
+      id: "batter",
+      lines: [
+        "",
+        ...panel("타자", toPanelBody(renderBatterSection(game.batterStats, false)), rightInner),
+      ],
+    },
+    {
+      id: "pitcher",
+      lines: [
+        "",
+        ...panel("투수", toPanelBody(renderPitcherSection(game.pitcherStats, false)), rightInner),
+      ],
+    },
+    { id: "recent", lines: [] },
+  ];
+  const leftFit = fitBody(leftSections, ctx.bodyBudget, null, ["diamond", "inning", "inning"]);
+  const rightFit = fitBody(rightSections, ctx.bodyBudget, recentFlex(game, ctx, rightInner), [
+    "batter",
+    "pitcher",
+  ]);
+  return {
+    lines: joinColumns(leftFit.lines, rightFit.lines, WIDE_LEFT_INNER),
+    viewport: rightFit.viewport,
+  };
+}
+
+// 섹션 앞에 구분 빈 줄. 내용이 없으면 빈 줄도 없이 통째로 사라진다.
+function prefixGap(lines: string[]): string[] {
+  return lines.length > 0 ? ["", ...lines] : [];
+}
+
+function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): FittedBody {
   if (ctx.mode === "wide" && ctx.rightInner != null) {
     return renderStartedBodyWide(game, ctx, ctx.rightInner);
   }
   const compact = ctx.mode === "compact";
-  const body: string[] = [""];
+  const count = `  ${compactCountLine(game.ball, game.strike, game.out)}`;
+  const compactHeader = scoreHeaderCompact(
+    game.awayTeamName,
+    game.homeTeamName,
+    game.awayScore,
+    game.homeScore,
+    game.topBottom === "top" ? pc.cyan("  ◀") : "",
+    game.topBottom === "bottom" ? pc.cyan("  ◀") : ""
+  );
 
+  const sections: Section[] = [];
   if (compact) {
-    body.push(
-      ...scoreHeaderCompact(
-        game.awayTeamName,
-        game.homeTeamName,
-        game.awayScore,
-        game.homeScore,
-        game.topBottom === "top" ? pc.cyan("  ◀") : "",
-        game.topBottom === "bottom" ? pc.cyan("  ◀") : ""
-      )
-    );
-    body.push("");
-    body.push(`  ${compactDiamond(game.bases)}`);
-    body.push(`  ${compactCountLine(game.ball, game.strike, game.out)}`);
-    body.push("");
+    sections.push({ id: "header", lines: ["", ...compactHeader] });
+    sections.push({ id: "diamond", lines: ["", `  ${compactDiamond(game.bases)}`, count] });
   } else {
-    body.push(
-      ...scoreHeaderBig(
-        game.awayTeamName,
-        game.homeTeamName,
-        game.awayScore,
-        game.homeScore,
-        startedCenterLines(game),
-        ctx.innerWidth - 2,
-        { flash: ctx.anim?.flash }
-      )
-    );
-    body.push("");
-    body.push(...diamondField(game.bases, ctx.anim));
-    body.push(`  ${compactCountLine(game.ball, game.strike, game.out)}`);
-    body.push("");
+    sections.push({
+      id: "header",
+      lines: [
+        "",
+        ...scoreHeaderBig(
+          game.awayTeamName,
+          game.homeTeamName,
+          game.awayScore,
+          game.homeScore,
+          startedCenterLines(game),
+          ctx.innerWidth - 2,
+          { flash: ctx.anim?.flash }
+        ),
+      ],
+      alt: ["", ...compactHeader],
+    });
+    sections.push({
+      id: "diamond",
+      lines: ["", ...diamondField(game.bases, ctx.anim), count],
+      alt: ["", `  ${compactDiamond(game.bases)}`, count],
+    });
   }
+  sections.push({
+    id: "batter",
+    lines: prefixGap(renderBatterSection(game.batterStats, compact)),
+    alt: compact ? undefined : prefixGap(renderBatterSection(game.batterStats, true)),
+  });
+  sections.push({
+    id: "pitcher",
+    lines: prefixGap(renderPitcherSection(game.pitcherStats, compact)),
+    alt: compact ? undefined : prefixGap(renderPitcherSection(game.pitcherStats, true)),
+  });
+  sections.push({
+    id: "inning",
+    lines: prefixGap(inningLineSection(game, ctx)),
+    alt: compact ? undefined : prefixGap(inningLineSection(game, ctx, { sparkline: false })),
+  });
+  sections.push({ id: "recent", lines: [] });
 
-  for (const ln of renderBatterSection(game.batterStats, compact)) body.push(ln);
-  body.push("");
-  for (const ln of renderPitcherSection(game.pitcherStats, compact)) body.push(ln);
-  body.push("");
-
-  const inningLines = inningLineSection(game, ctx);
-  if (inningLines.length > 0) {
-    for (const ln of inningLines) body.push(ln);
-    body.push("");
-  }
-
-  for (const ln of recentPlayLines(game, ctx, ctx.innerWidth - 4)) body.push(ln);
-  return body;
+  const degrade = compact
+    ? ["batter", "pitcher", "inning"]
+    : ["inning", "batter", "pitcher", "diamond", "batter", "pitcher", "inning", "header"];
+  return fitBody(sections, ctx.bodyBudget, recentFlex(game, ctx, ctx.innerWidth - 4), degrade);
 }
 
 // RESULT 헤더용: 승/패/무 태그.
@@ -685,66 +857,98 @@ function resultTags(game: NormalizedGame): { awayTag?: string; homeTag?: string 
 }
 const RESULT_CENTER = ["", "", pc.bold("경기 종료"), "", ""];
 
-function renderResultBodyWide(game: NormalizedGame, ctx: RenderCtx, rightInner: number): string[] {
-  const left: string[] = [""];
-  left.push(
-    ...scoreHeaderBig(
-      game.awayTeamName,
-      game.homeTeamName,
-      game.awayScore,
-      game.homeScore,
-      RESULT_CENTER,
-      WIDE_LEFT_INNER,
-      resultTags(game)
-    )
-  );
-  left.push("");
-  if (game.homeRheb && game.awayRheb) {
-    left.push(pc.dim("  ─ 박스스코어 ─"));
-    const head = ["R", "H", "E", "B"].map((c) => c.padStart(3)).join(" ");
-    left.push(`  ${padEnd("", 6)} ${pc.dim(head)}`);
-    const cells = (r: { r: number; h: number; e: number; b: number }) =>
-      [r.r, r.h, r.e, r.b].map((n) => String(n).padStart(3)).join(" ");
-    left.push(`  ${padEnd(game.awayTeamName, 6)} ${cells(game.awayRheb)}`);
-    left.push(`  ${padEnd(game.homeTeamName, 6)} ${cells(game.homeRheb)}`);
-    left.push("");
-  }
+function boxscoreLines(game: NormalizedGame): string[] {
+  if (!game.homeRheb || !game.awayRheb) return [];
+  const out = [pc.dim("  ─ 박스스코어 ─")];
+  const head = ["R", "H", "E", "B"].map((c) => c.padStart(3)).join(" ");
+  out.push(`  ${padEnd("", 6)} ${pc.dim(head)}`);
+  const cells = (r: { r: number; h: number; e: number; b: number }) =>
+    [r.r, r.h, r.e, r.b].map((n) => String(n).padStart(3)).join(" ");
+  out.push(`  ${padEnd(game.awayTeamName, 6)} ${cells(game.awayRheb)}`);
+  out.push(`  ${padEnd(game.homeTeamName, 6)} ${cells(game.homeRheb)}`);
+  return out;
+}
+
+function resultMetaLines(game: NormalizedGame): string[] {
   const starterMatch =
     game.awayStarter || game.homeStarter
       ? `${game.awayStarter ?? "?"}  vs  ${game.homeStarter ?? "?"}`
       : null;
-  const resultLines = labelValueRows([
+  const rows = labelValueRows([
     ["승리투수", game.winPitcher],
     ["패전투수", game.losePitcher],
     ["선발", starterMatch],
   ]);
-  if (resultLines.length > 0) {
-    left.push(pc.dim("  ─ 결과 ─"));
-    for (const ln of resultLines) left.push(ln);
-    left.push("");
-  }
-  const inningLines = inningLineSection(game, { ...ctx, mode: "normal" });
-  for (const ln of inningLines) left.push(ln);
-
-  const right: string[] = [""];
-  const highlights = filterResultHighlights(game.recentPlays);
-  if (highlights.length > 0) {
-    right.push(pc.dim("  ─ 하이라이트 ─"));
-    for (const p of highlights.slice(0, 10)) {
-      right.push(trimToWidth(`  ${pc.dim("▸")} ${p}`, rightInner));
-    }
-  }
-  return joinColumns(left, right, WIDE_LEFT_INNER);
+  return rows.length > 0 ? [pc.dim("  ─ 결과 ─"), ...rows] : [];
 }
 
-function renderResultBody(game: NormalizedGame, ctx: RenderCtx): string[] {
+// 하이라이트 flex 섹션 (RESULT). base 는 기존 상한(compact 3 / normal 5 / wide 10).
+function highlightFlex(game: NormalizedGame, ctx: RenderCtx, width: number): FlexSection | null {
+  const highlights = filterResultHighlights(game.recentPlays);
+  if (highlights.length === 0) return null;
+  const base = ctx.mode === "wide" ? 10 : ctx.mode === "compact" ? 3 : 5;
+  return {
+    min: Math.min(2, highlights.length),
+    base,
+    max: highlights.length,
+    render: (v) => [
+      "",
+      pc.dim("  ─ 하이라이트 ─"),
+      ...highlights.slice(0, v).map((p) => `  ${pc.dim("▸")} ${trimToWidth(p, width)}`),
+    ],
+  };
+}
+
+function renderResultBodyWide(
+  game: NormalizedGame,
+  ctx: RenderCtx,
+  rightInner: number
+): FittedBody {
+  const leftSections: Section[] = [
+    {
+      id: "header",
+      lines: [
+        "",
+        ...scoreHeaderBig(
+          game.awayTeamName,
+          game.homeTeamName,
+          game.awayScore,
+          game.homeScore,
+          RESULT_CENTER,
+          WIDE_LEFT_INNER,
+          resultTags(game)
+        ),
+      ],
+    },
+    { id: "boxscore", lines: prefixGap(boxscoreLines(game)) },
+    { id: "resultmeta", lines: prefixGap(resultMetaLines(game)) },
+    {
+      id: "inning",
+      lines: prefixGap(inningLineSection(game, { ...ctx, mode: "normal" })),
+      alt: prefixGap(inningLineSection(game, { ...ctx, mode: "normal" }, { sparkline: false })),
+    },
+  ];
+  const rightSections: Section[] = [{ id: "recent", lines: [] }];
+  const leftFit = fitBody(leftSections, ctx.bodyBudget, null, ["inning", "inning", "resultmeta"]);
+  const rightFit = fitBody(
+    rightSections,
+    ctx.bodyBudget,
+    highlightFlex(game, ctx, rightInner - 4),
+    []
+  );
+  return {
+    lines: joinColumns(leftFit.lines, rightFit.lines, WIDE_LEFT_INNER),
+    viewport: rightFit.viewport,
+  };
+}
+
+function renderResultBody(game: NormalizedGame, ctx: RenderCtx): FittedBody {
   if (ctx.mode === "wide" && ctx.rightInner != null) {
     return renderResultBodyWide(game, ctx, ctx.rightInner);
   }
-  const body: string[] = [""];
-  if (ctx.mode === "compact") {
-    body.push(
-      ...scoreHeaderCompact(
+  const compact = ctx.mode === "compact";
+  const header = compact
+    ? scoreHeaderCompact(
         game.awayTeamName,
         game.homeTeamName,
         game.awayScore,
@@ -752,10 +956,7 @@ function renderResultBody(game: NormalizedGame, ctx: RenderCtx): string[] {
         game.winner === "AWAY" ? pc.yellow("  ★") : "",
         game.winner === "HOME" ? pc.yellow("  ★") : ""
       )
-    );
-  } else {
-    body.push(
-      ...scoreHeaderBig(
+    : scoreHeaderBig(
         game.awayTeamName,
         game.homeTeamName,
         game.awayScore,
@@ -763,52 +964,36 @@ function renderResultBody(game: NormalizedGame, ctx: RenderCtx): string[] {
         RESULT_CENTER,
         ctx.innerWidth - 2,
         resultTags(game)
-      )
-    );
-  }
-  body.push("");
-
-  if (game.homeRheb && game.awayRheb) {
-    body.push(pc.dim("  ─ 박스스코어 ─"));
-    const head = ["R", "H", "E", "B"].map((c) => c.padStart(3)).join(" ");
-    body.push(`  ${padEnd("", 6)} ${pc.dim(head)}`);
-    const cells = (r: { r: number; h: number; e: number; b: number }) =>
-      [r.r, r.h, r.e, r.b].map((n) => String(n).padStart(3)).join(" ");
-    body.push(`  ${padEnd(game.awayTeamName, 6)} ${cells(game.awayRheb)}`);
-    body.push(`  ${padEnd(game.homeTeamName, 6)} ${cells(game.homeRheb)}`);
-    body.push("");
-  }
-
-  const starterMatch =
-    game.awayStarter || game.homeStarter
-      ? `${game.awayStarter ?? "?"}  vs  ${game.homeStarter ?? "?"}`
-      : null;
-  const resultLines = labelValueRows([
-    ["승리투수", game.winPitcher],
-    ["패전투수", game.losePitcher],
-    ["선발", starterMatch],
-  ]);
-  if (resultLines.length > 0) {
-    body.push(pc.dim("  ─ 결과 ─"));
-    for (const ln of resultLines) body.push(ln);
-    body.push("");
-  }
-
-  const inningLines = inningLineSection(game, ctx);
-  if (inningLines.length > 0) {
-    for (const ln of inningLines) body.push(ln);
-    body.push("");
-  }
-
-  const highlights = filterResultHighlights(game.recentPlays);
-  if (highlights.length > 0) {
-    body.push(pc.dim("  ─ 하이라이트 ─"));
-    const limit = ctx.mode === "compact" ? 3 : 5;
-    for (const p of highlights.slice(0, limit)) {
-      body.push(`  ${pc.dim("▸")} ${trimToWidth(p, ctx.innerWidth - 6)}`);
-    }
-  }
-  return body;
+      );
+  const sections: Section[] = [
+    {
+      id: "header",
+      lines: ["", ...header],
+      alt: compact
+        ? undefined
+        : [
+            "",
+            ...scoreHeaderCompact(
+              game.awayTeamName,
+              game.homeTeamName,
+              game.awayScore,
+              game.homeScore
+            ),
+          ],
+    },
+    { id: "boxscore", lines: prefixGap(boxscoreLines(game)) },
+    { id: "resultmeta", lines: prefixGap(resultMetaLines(game)) },
+    {
+      id: "inning",
+      lines: prefixGap(inningLineSection(game, ctx)),
+      alt: compact ? undefined : prefixGap(inningLineSection(game, ctx, { sparkline: false })),
+    },
+    { id: "recent", lines: [] },
+  ];
+  const degrade = compact
+    ? ["inning", "resultmeta", "boxscore"]
+    : ["inning", "resultmeta", "inning", "boxscore", "header"];
+  return fitBody(sections, ctx.bodyBudget, highlightFlex(game, ctx, ctx.innerWidth - 6), degrade);
 }
 
 function readyInfoLines(game: NormalizedGame): string[] {
@@ -846,7 +1031,7 @@ function readyHeader(game: NormalizedGame, innerWidth: number, compact: boolean)
   );
 }
 
-function renderReadyBody(game: NormalizedGame, ctx: RenderCtx): string[] {
+function renderReadyBody(game: NormalizedGame, ctx: RenderCtx): FittedBody {
   const infoLines = readyInfoLines(game);
   // wide 인데 우측 정보가 부족하면 normal 로 격하해 휑함을 피한다.
   if (ctx.mode === "wide" && ctx.rightInner != null && infoLines.length >= 3) {
@@ -866,25 +1051,24 @@ function renderReadyBody(game: NormalizedGame, ctx: RenderCtx): string[] {
         ctx.rightInner
       )
     );
-    return joinColumns(left, right, WIDE_LEFT_INNER);
+    return { lines: joinColumns(left, right, WIDE_LEFT_INNER), viewport: 0 };
   }
 
-  const body: string[] = [""];
-  body.push(...readyHeader(game, ctx.innerWidth - 2, ctx.mode === "compact"));
-  body.push("");
-
-  if (game.awayStarter || game.homeStarter) {
-    body.push(pc.dim("  ─ 선발 ─"));
-    body.push(`  ${padEnd(game.awayTeamName, 6)} ${game.awayStarter ?? pc.dim("미정")}`);
-    body.push(`  ${padEnd(game.homeTeamName, 6)} ${game.homeStarter ?? pc.dim("미정")}`);
-    body.push("");
-  }
-
-  if (infoLines.length > 0) {
-    body.push(pc.dim("  ─ 경기 정보 ─"));
-    for (const ln of infoLines) body.push(ln);
-  }
-  return body;
+  const starters: string[] =
+    game.awayStarter || game.homeStarter
+      ? [
+          pc.dim("  ─ 선발 ─"),
+          `  ${padEnd(game.awayTeamName, 6)} ${game.awayStarter ?? pc.dim("미정")}`,
+          `  ${padEnd(game.homeTeamName, 6)} ${game.homeStarter ?? pc.dim("미정")}`,
+        ]
+      : [];
+  const info = infoLines.length > 0 ? [pc.dim("  ─ 경기 정보 ─"), ...infoLines] : [];
+  const sections: Section[] = [
+    { id: "header", lines: ["", ...readyHeader(game, ctx.innerWidth - 2, ctx.mode === "compact")] },
+    { id: "starters", lines: prefixGap(starters) },
+    { id: "info", lines: prefixGap(info) },
+  ];
+  return fitBody(sections, ctx.bodyBudget, null, ["info", "starters"]);
 }
 
 const HEADER_LABEL: Record<GameStatus, (g: NormalizedGame) => string> = {
@@ -897,7 +1081,7 @@ const HEADER_LABEL: Record<GameStatus, (g: NormalizedGame) => string> = {
   SUSPENDED: () => "경기 중단",
 };
 
-const BODY_RENDERERS: Record<GameStatus, (g: NormalizedGame, ctx: RenderCtx) => string[]> = {
+const BODY_RENDERERS: Record<GameStatus, (g: NormalizedGame, ctx: RenderCtx) => FittedBody> = {
   STARTED: renderStartedBody,
   RESULT: renderResultBody,
   READY: renderReadyBody,
@@ -919,16 +1103,21 @@ function livePulseTag(pulse?: number): string {
   return `${glyph} ${pc.green("LIVE")}`;
 }
 
-export function renderGame(
+export interface RenderGameOpts {
+  staleSec?: number;
+  multiGame?: boolean;
+  layout?: LayoutMode | "auto";
+  historyOffset?: number;
+  anim?: RenderAnim;
+  rows?: number; // 높이 강제 (fixture/테스트용) — 미지정 시 detectRows()
+}
+
+// watch 루프용: 프레임 문자열과 함께 실제 적용된 최근 플레이 viewport 를 돌려준다
+// (히스토리 스크롤 클램프가 고정값이 아닌 실측 viewport 를 쓰도록).
+export function renderGameFrame(
   game: NormalizedGame,
-  opts: {
-    staleSec?: number;
-    multiGame?: boolean;
-    layout?: LayoutMode | "auto";
-    historyOffset?: number;
-    anim?: RenderAnim;
-  } = {}
-): string {
+  opts: RenderGameOpts = {}
+): { text: string; recentViewport: number } {
   const stale = opts.staleSec ?? 0;
   const cols = detectColumns();
   const mode = pickLayoutMode(cols, opts.layout);
@@ -939,11 +1128,18 @@ export function renderGame(
   const staleTag = stale > 0 ? pc.yellow(` ⚠ stale ${stale}s`) : "";
   const title = `KBO · ${headerStatus}${venue}${staleTag}`;
 
+  // 본문 높이 예산: 프레임 4줄(상단/구분선/푸터/하단) + watch draw 의 말미 빈 줄 1
+  // + 커서 여유 1 + 멀티게임 컨텍스트 1 을 빼고 남는 줄. rows=0(비 TTY)이면 무제한.
+  const rows = opts.rows ?? detectRows();
+  const reserved = 6 + (opts.multiGame ? 1 : 0);
+  const bodyBudget = rows > 0 ? Math.max(8, rows - reserved) : Number.POSITIVE_INFINITY;
+
   const ctx: RenderCtx = {
     mode,
     innerWidth,
     historyOffset: opts.historyOffset ?? 0,
     recentViewport: recentViewportForMode(mode),
+    bodyBudget,
     anim: opts.anim,
   };
   if (mode === "wide") {
@@ -955,7 +1151,14 @@ export function renderGame(
 
   const switchHint = opts.multiGame ? "  ←/→:경기전환" : "";
   const footer = `q:종료  r:새로고침${switchHint}  · ${timeStr(game.fetchedAt)}`;
-  return frame(title, body, footer, innerWidth).join("\n");
+  return {
+    text: frame(title, body.lines, footer, innerWidth).join("\n"),
+    recentViewport: body.viewport,
+  };
+}
+
+export function renderGame(game: NormalizedGame, opts: RenderGameOpts = {}): string {
+  return renderGameFrame(game, opts).text;
 }
 
 export function renderScheduleList(

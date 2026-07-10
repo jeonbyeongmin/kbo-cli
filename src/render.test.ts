@@ -280,3 +280,65 @@ describe("renderGame STARTED 최근 플레이 historyOffset", () => {
     expect(out).not.toContain("p5");
   });
 });
+
+describe("renderGame 높이 인지 (rows 예산)", () => {
+  const manyPlays = Array.from({ length: 40 }, (_, i) => `play${i + 1}`);
+  const game = () =>
+    makeStarted({
+      status: "STARTED",
+      recentPlays: manyPlays,
+      inningLine: {
+        away: ["0", "1", "0", "2", "0", "0", "0", "0", "0"],
+        home: ["1", "0", "0", "0", "0", "3", "0", "0", "-"],
+      },
+    });
+
+  const lineCount = (out: string): number => out.split("\n").length;
+
+  test("rows 미지정(비 TTY) — 기존 기본 viewport 유지", () => {
+    const prev = process.env.COLUMNS;
+    process.env.COLUMNS = "96";
+    try {
+      const out = strip(renderGame(game(), { layout: "normal" }));
+      const shown = manyPlays.filter((p) => out.includes(p)).length;
+      expect(shown).toBe(5); // normal 기본 viewport
+    } finally {
+      process.env.COLUMNS = prev;
+    }
+  });
+
+  test("낮은 터미널(rows 20) — 프레임이 예산 안으로 강등되고 잘리지 않음", () => {
+    const prev = process.env.COLUMNS;
+    process.env.COLUMNS = "96";
+    try {
+      const out = renderGame(game(), { layout: "normal", rows: 20 });
+      expect(lineCount(out)).toBeLessThanOrEqual(20 - 2); // 프레임 전체 ≤ rows - 여유
+    } finally {
+      process.env.COLUMNS = prev;
+    }
+  });
+
+  test("높은 터미널(rows 50) — 최근 플레이 viewport 가 확장돼 세로를 채움", () => {
+    const prev = process.env.COLUMNS;
+    process.env.COLUMNS = "96";
+    try {
+      const out = strip(renderGame(game(), { layout: "normal", rows: 50 }));
+      const shown = manyPlays.filter((p) => out.includes(p)).length;
+      expect(shown).toBeGreaterThan(10);
+      expect(lineCount(out)).toBeLessThanOrEqual(50 - 2);
+    } finally {
+      process.env.COLUMNS = prev;
+    }
+  });
+
+  test("극단적으로 낮은 터미널(rows 12) — 하드 트림으로도 예산 준수", () => {
+    const prev = process.env.COLUMNS;
+    process.env.COLUMNS = "96";
+    try {
+      const out = renderGame(game(), { layout: "normal", rows: 12 });
+      expect(lineCount(out)).toBeLessThanOrEqual(14); // budget floor(8) + frame 4 + 여유
+    } finally {
+      process.env.COLUMNS = prev;
+    }
+  });
+});
