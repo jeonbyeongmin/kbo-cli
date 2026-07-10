@@ -1,13 +1,22 @@
 import { fetchRelay, fetchSchedule, isPlayable, normalize, todayDate } from "./api.ts";
 import {
   type LayoutMode,
+  type RenderAnim,
   detectColumns,
   onResize,
   pickLayoutMode,
   recentViewportForMode,
   renderGame,
 } from "./render.ts";
-import type { NormalizedGame, ScheduleGame } from "./types.ts";
+import type { NormalizedGame, ScheduleGame, TextRelayData } from "./types.ts";
+
+// 애니메이션 타이밍. STARTED 에서만 구동한다.
+const ANIM_INTERVAL_MS = 120; // ~8fps 리드로우
+const PULSE_MS = 1400; // ● LIVE 맥동 주기
+const FLASH_MS = 1400; // 득점 시 대형숫자 플래시 지속
+const RUNNER_MS = 700; // 진루 이동 지속
+
+type RunnerAnim = { toBase: "first" | "second" | "third"; start: number };
 
 function recentViewportFor(layout: LayoutMode | "auto" | undefined): number {
   return recentViewportForMode(pickLayoutMode(detectColumns(), layout));
@@ -31,6 +40,8 @@ interface WatchOptions {
   initialGameIndex: number;
   liveGames: ScheduleGame[];
   layout?: LayoutMode | "auto";
+  // 개발용: 네트워크 대신 이 relay 를 그대로 사용 (라이브 경기 없을 때 fixture 관전).
+  fixtureRelay?: TextRelayData;
 }
 
 export async function watch(opts: WatchOptions): Promise<void> {
@@ -40,6 +51,61 @@ export async function watch(opts: WatchOptions): Promise<void> {
   let lastError: string | null = null;
   let liveGames = opts.liveGames;
   let historyOffset = 0;
+
+  // 모션 상태.
+  let flashSide: "away" | "home" | null = null;
+  let flashStart = 0;
+  let runnerAnims: RunnerAnim[] = [];
+  let animTimer: ReturnType<typeof setInterval> | null = null;
+
+  // 폴링 결과의 점수·베이스 변화를 감지해 플래시/진루 애니를 트리거한다.
+  const detectAnim = (prev: NormalizedGame | null, next: NormalizedGame): void => {
+    if (!prev || prev.gameId !== next.gameId || next.status !== "STARTED") return;
+    const now = Date.now();
+    if (next.awayScore > prev.awayScore) {
+      flashSide = "away";
+      flashStart = now;
+    }
+    if (next.homeScore > prev.homeScore) {
+      flashSide = "home";
+      flashStart = now;
+    }
+    for (const b of ["first", "second", "third"] as const) {
+      if (!prev.bases[b] && next.bases[b]) runnerAnims.push({ toBase: b, start: now });
+    }
+    runnerAnims = runnerAnims.filter((r) => now - r.start < RUNNER_MS);
+  };
+
+  const resetAnim = (): void => {
+    flashSide = null;
+    runnerAnims = [];
+  };
+
+  const currentAnim = (): RenderAnim | undefined => {
+    if (!lastGame || lastGame.status !== "STARTED") return undefined;
+    const now = Date.now();
+    const pulse = 0.5 + 0.5 * Math.sin((now / PULSE_MS) * Math.PI * 2);
+    const flash =
+      flashSide && now - flashStart < FLASH_MS
+        ? { side: flashSide, level: 1 - (now - flashStart) / FLASH_MS }
+        : undefined;
+    const runners = runnerAnims
+      .filter((r) => now - r.start < RUNNER_MS)
+      .map((r) => ({ toBase: r.toBase, t: (now - r.start) / RUNNER_MS }));
+    return { pulse, flash, runners };
+  };
+
+  const ensureAnimTimer = (): void => {
+    const live = lastGame?.status === "STARTED" && !!process.stdout.isTTY;
+    if (live && !animTimer) {
+      animTimer = setInterval(() => {
+        if (!stopped) draw();
+      }, ANIM_INTERVAL_MS);
+    } else if (!live && animTimer) {
+      clearInterval(animTimer);
+      animTimer = null;
+    }
+  };
 
   const setHistoryOffset = (next: number) => {
     if (!lastGame || lastGame.status !== "STARTED") {
@@ -59,6 +125,7 @@ export async function watch(opts: WatchOptions): Promise<void> {
 
   const cleanup = () => {
     if (timer) clearTimeout(timer);
+    if (animTimer) clearInterval(animTimer);
     if (offResize) offResize();
     if (process.stdin.isTTY && process.stdin.setRawMode) process.stdin.setRawMode(false);
     process.stdin.pause();
@@ -111,6 +178,7 @@ export async function watch(opts: WatchOptions): Promise<void> {
         idx = (idx + 1) % liveGames.length;
         lastGame = null;
         historyOffset = 0;
+        resetAnim();
         void poll();
         return;
       }
@@ -118,6 +186,7 @@ export async function watch(opts: WatchOptions): Promise<void> {
         idx = (idx - 1 + liveGames.length) % liveGames.length;
         lastGame = null;
         historyOffset = 0;
+        resetAnim();
         void poll();
         return;
       }
@@ -139,6 +208,7 @@ export async function watch(opts: WatchOptions): Promise<void> {
         multiGame: liveGames.length > 1,
         layout: opts.layout,
         historyOffset,
+        anim: currentAnim(),
       });
     } else if (lastError) {
       body = `\n  ${lastError}\n`;
@@ -165,10 +235,13 @@ export async function watch(opts: WatchOptions): Promise<void> {
     pollInFlight = true;
     try {
       const sched = liveGames[idx]!;
-      const relay = await fetchRelay(sched.gameId);
+      const relay = opts.fixtureRelay ?? (await fetchRelay(sched.gameId));
+      const prev = lastGame;
       lastGame = normalize(sched, relay);
       lastFetch = Date.now();
       lastError = null;
+      detectAnim(prev, lastGame);
+      ensureAnimTimer();
       setHistoryOffset(historyOffset);
     } catch (e) {
       lastError = `fetch 실패: ${(e as Error).message}`;
@@ -180,6 +253,7 @@ export async function watch(opts: WatchOptions): Promise<void> {
 
   // periodic refresh — BEFORE 가 STARTED 로 전환되거나 새 경기가 시작되는 걸 따라잡는다.
   const refreshSchedule = async () => {
+    if (opts.fixtureRelay) return; // fixture 모드에서는 일정 갱신이 의미 없음
     try {
       const all = await fetchSchedule(todayDate());
       const playable = all.filter((g) => isPlayable(g.statusCode));

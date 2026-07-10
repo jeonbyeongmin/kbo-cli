@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import pc from "picocolors";
 import {
   fetchGameBasic,
@@ -18,7 +19,7 @@ import {
   renderScheduleList,
 } from "./render.ts";
 import { cmdStats } from "./stats.ts";
-import type { GameStatus } from "./types.ts";
+import type { GameStatus, ScheduleGame, TextRelayData } from "./types.ts";
 import {
   CURRENT_VERSION,
   getUpdateBanner,
@@ -38,6 +39,9 @@ interface Args {
   help: boolean;
   statsView: "standings" | "batting" | "pitching";
   layout?: LayoutMode | "auto";
+  // 개발용: fixture 파일로 watch (라이브 경기 없을 때), --status 로 상태 강제.
+  fixture?: string;
+  statusOverride?: GameStatus;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -57,6 +61,8 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--game") args.game = argv[++i];
     else if (a === "--date") args.date = argv[++i] ?? args.date;
     else if (a === "--interval") args.intervalSec = Math.max(1, Number(argv[++i]) || 5);
+    else if (a === "--fixture") args.fixture = argv[++i];
+    else if (a === "--status") args.statusOverride = argv[++i] as GameStatus;
     else if (a === "--layout") {
       const v = argv[++i];
       if (isLayoutMode(v)) args.layout = v;
@@ -97,6 +103,7 @@ function printHelp(): void {
   --interval <sec>   폴링 주기 (기본 5, config 폴백)
   --date <YYYY-MM-DD>
   --layout <mode>    auto/compact/normal/wide (기본 auto, config 폴백)
+  --fixture <path>   watch: fixture 파일로 관전 (개발용, --status STARTED 로 라이브 화면 강제)
   --debug            raw 응답 dump
   -h, --help
 
@@ -133,6 +140,29 @@ async function cmdToday(args: Args): Promise<void> {
 
 async function cmdWatch(args: Args): Promise<void> {
   const cfg = loadConfig();
+
+  // 개발용 fixture 관전 — 라이브 경기가 없어도 watch 화면을 확인할 수 있다.
+  if (args.fixture) {
+    let fx: { schedule: ScheduleGame; relay: TextRelayData };
+    try {
+      fx = JSON.parse(await readFile(args.fixture, "utf8"));
+    } catch (e) {
+      console.error(pc.red(`fixture 로드 실패: ${(e as Error).message}`));
+      process.exit(1);
+    }
+    const sched = args.statusOverride
+      ? { ...fx.schedule, statusCode: args.statusOverride }
+      : fx.schedule;
+    await watch({
+      intervalSec: args.intervalSec ?? cfg.interval ?? 5,
+      initialGameIndex: 0,
+      liveGames: [sched],
+      layout: args.layout ?? cfg.layout,
+      fixtureRelay: fx.relay,
+    });
+    return;
+  }
+
   const games = await fetchSchedule(args.date);
 
   if (args.debug && args.game) {

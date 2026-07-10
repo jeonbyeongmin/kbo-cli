@@ -10,7 +10,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { normalize } from "../src/api.ts";
-import { renderGame } from "../src/render.ts";
+import { type RenderAnim, renderGame } from "../src/render.ts";
 import type { GameStatus, ScheduleGame, TextRelayData } from "../src/types.ts";
 
 interface Fixture {
@@ -52,6 +52,8 @@ async function main(): Promise<void> {
   let statusOverride: GameStatus | null = null;
   let staleSec = 0;
   let historyOffset = 0;
+  // 애니메이션 프레임 강제 (라이브 없이 모션 렌더 검증용).
+  const anim: RenderAnim = {};
   const paths: string[] = [];
 
   for (let i = 0; i < argv.length; i++) {
@@ -59,20 +61,36 @@ async function main(): Promise<void> {
     if (a === "--status") statusOverride = argv[++i] as GameStatus;
     else if (a === "--stale") staleSec = Number(argv[++i] ?? 0);
     else if (a === "--history") historyOffset = Number(argv[++i] ?? 0);
-    else if (a === "-h" || a === "--help") {
+    else if (a === "--pulse") anim.pulse = Number(argv[++i] ?? 0);
+    else if (a === "--flash") {
+      // --flash away[:level]  (level 기본 1)
+      const [side, lvl] = (argv[++i] ?? "").split(":");
+      anim.flash = { side: side as "away" | "home", level: lvl != null ? Number(lvl) : 1 };
+    } else if (a === "--runner") {
+      // --runner second:0.5  (반복 가능)
+      const [toBase, t] = (argv[++i] ?? "").split(":");
+      if (!anim.runners) anim.runners = [];
+      anim.runners.push({
+        toBase: toBase as "first" | "second" | "third" | "home",
+        t: t != null ? Number(t) : 1,
+      });
+    } else if (a === "-h" || a === "--help") {
       console.log(
-        "usage: render-fixture.ts [path...] [--status <code>] [--stale <sec>] [--history <offset>]"
+        "usage: render-fixture.ts [path...] [--status <code>] [--stale <sec>] [--history <offset>] [--pulse <0..1>] [--flash <away|home>[:level]] [--runner <base>:<t>]"
       );
       return;
     } else paths.push(a);
   }
 
+  const hasAnim = anim.pulse != null || anim.flash != null || anim.runners != null;
   const fxs = await loadFixtures(paths);
   for (const { label, fx } of fxs) {
     const sched = statusOverride ? { ...fx.schedule, statusCode: statusOverride } : fx.schedule;
     const ng = normalize(sched, fx.relay);
     process.stdout.write(`\n\x1b[2m# ${label}  (captured ${fx.capturedAt})\x1b[22m\n`);
-    process.stdout.write(`${renderGame(ng, { staleSec, historyOffset })}\n`);
+    process.stdout.write(
+      `${renderGame(ng, { staleSec, historyOffset, anim: hasAnim ? anim : undefined })}\n`
+    );
   }
 }
 

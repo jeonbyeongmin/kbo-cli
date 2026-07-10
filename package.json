@@ -39,6 +39,7 @@
     "test": "bun test --pass-with-no-tests",
     "snapshot": "bun run scripts/snapshot.ts",
     "render:fixture": "bun run scripts/render-fixture.ts",
+    "watch:fixture": "bun run src/index.ts watch --status STARTED --fixture fixtures/20260501HHSS02026.json",
     "prepublishOnly": "command -v bun >/dev/null || export PATH=\"$HOME/.bun/bin:$PATH\"; bun run typecheck && bun run build"
   },
   "dependencies": {

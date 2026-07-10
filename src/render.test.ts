@@ -127,12 +127,15 @@ describe("renderGame 프레임 정사각 (모든 줄 동일 폭)", () => {
 });
 
 describe("renderGame STARTED 카운트 위치", () => {
-  test("normal — 다이아몬드 다음 줄에 한 줄 카운트", () => {
+  test("normal — 브라유 필드 다음 줄에 한 줄 카운트", () => {
     const out = strip(renderGame(makeStarted(), { layout: "normal" }));
     const lines = out.split("\n");
-    const diamondIdx = lines.findIndex((l) => l.includes("⌂"));
-    expect(diamondIdx).toBeGreaterThan(-1);
-    expect(lines[diamondIdx + 1]).toMatch(/B .*S .*O /);
+    // 브라유 필드가 존재하고, 그 마지막 줄 바로 다음이 카운트 한 줄.
+    const isField = (l: string): boolean => /[⠀-⣿]/.test(l);
+    const fieldIdxs = lines.map((l, i) => (isField(l) ? i : -1)).filter((i) => i >= 0);
+    expect(fieldIdxs.length).toBeGreaterThan(0);
+    const lastField = fieldIdxs[fieldIdxs.length - 1]!;
+    expect(lines[lastField + 1]).toMatch(/B .*S .*O /);
   });
 
   test("normal — 옛 5줄 countBlock 패턴 (별도 B/S/O 줄) 등장 X", () => {
@@ -161,6 +164,53 @@ describe("renderGame STARTED 카운트 위치", () => {
   test("compact — 기존 한 줄 카운트 그대로", () => {
     const out = strip(renderGame(makeStarted(), { layout: "compact" }));
     expect(out).toMatch(/B .*S .*O /);
+  });
+});
+
+describe("renderGame 모션(anim)", () => {
+  const frameLineWidths = (out: string): number[] =>
+    out
+      .split("\n")
+      .filter((l) => /^[┌│├└]/.test(strip(l)))
+      .map(visualWidth);
+
+  for (const layout of ["normal", "wide"] as const) {
+    test(`${layout} — anim 프레임도 정사각 유지`, () => {
+      const prev = process.env.COLUMNS;
+      process.env.COLUMNS = layout === "wide" ? "140" : "96";
+      try {
+        const out = renderGame(
+          makeStarted({ bases: { first: true, second: true, third: false } }),
+          {
+            layout,
+            anim: {
+              pulse: 0.9,
+              flash: { side: "home", level: 0.7 },
+              runners: [{ toBase: "second", t: 0.5 }],
+            },
+          }
+        );
+        expect(new Set(frameLineWidths(out)).size).toBe(1);
+      } finally {
+        if (prev === undefined) Reflect.deleteProperty(process.env, "COLUMNS");
+        else process.env.COLUMNS = prev;
+      }
+    });
+  }
+
+  test("주자 이동은 t 에 따라 필드 프레임이 달라진다", () => {
+    const prev = process.env.COLUMNS;
+    process.env.COLUMNS = "96";
+    try {
+      const g = makeStarted();
+      const at = (t: number): string =>
+        strip(renderGame(g, { layout: "normal", anim: { runners: [{ toBase: "second", t }] } }));
+      // 색이 아니라 브라유 글리프 자체가 이동하므로 strip 후에도 달라야 한다.
+      expect(at(0.2)).not.toBe(at(0.9));
+    } finally {
+      if (prev === undefined) Reflect.deleteProperty(process.env, "COLUMNS");
+      else process.env.COLUMNS = prev;
+    }
   });
 });
 

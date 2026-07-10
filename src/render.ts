@@ -269,20 +269,121 @@ export function frame(
   return lines;
 }
 
-function diamondLines(bases: { first: boolean; second: boolean; third: boolean }): string[] {
-  const r1 = bases.first;
-  const r2 = bases.second;
-  const r3 = bases.third;
-  const filled = pc.yellow("◆");
-  const empty = pc.dim("◇");
-  // 2nd at top, 3rd left, 1st right
-  return [
-    `       ${r2 ? filled : empty}       `,
-    "     ╱   ╲     ",
-    `   ${r3 ? filled : empty}       ${r1 ? filled : empty}   `,
-    "     ╲   ╱     ",
-    "       ⌂       ",
-  ];
+// 렌더에 얹는 모션 상태. watch 의 애니메이션 루프가 프레임마다 계산해 넘긴다.
+// 정적 렌더(fixture/test)에선 전부 생략 → 기존과 동일한 정지 화면.
+export interface RenderAnim {
+  pulse?: number; // 0..1 — LIVE 인디케이터 맥동
+  flash?: { side: "away" | "home"; level: number }; // 득점 팀 대형숫자 플래시 (level 1→0)
+  runners?: { toBase: "first" | "second" | "third" | "home"; t: number }[]; // 진루 이동 (t 0→1)
+}
+
+// 브라유(셀당 2×4 서브픽셀) 도트 비트 배치.
+const BRAILLE_DOTS = [
+  [0x01, 0x08],
+  [0x02, 0x10],
+  [0x04, 0x20],
+  [0x40, 0x80],
+];
+
+// 야구 내야를 브라유로 래스터라이즈한다. path(베이스라인)·base(빈 베이스)·
+// run(주자/이동 점) 3 레이어를 셀 단위로 OR 한 뒤 우선순위 색(run>base>path)으로 칠한다.
+const FIELD_W = 30;
+const FIELD_H = 28;
+const FIELD_COLS = FIELD_W / 2; // 15
+const FIELD_ROWS = FIELD_H / 4; // 7
+const FIELD_V = {
+  home: [15, 26],
+  first: [28, 13],
+  second: [15, 1],
+  third: [2, 13],
+} as const;
+
+function diamondField(
+  bases: { first: boolean; second: boolean; third: boolean },
+  anim?: RenderAnim
+): string[] {
+  const path = new Uint8Array(FIELD_COLS * FIELD_ROWS);
+  const base = new Uint8Array(FIELD_COLS * FIELD_ROWS);
+  const run = new Uint8Array(FIELD_COLS * FIELD_ROWS);
+
+  const dot = (grid: Uint8Array, x: number, y: number): void => {
+    const xi = Math.round(x);
+    const yi = Math.round(y);
+    if (xi < 0 || yi < 0 || xi >= FIELD_W || yi >= FIELD_H) return;
+    grid[Math.floor(yi / 4) * FIELD_COLS + Math.floor(xi / 2)]! |= BRAILLE_DOTS[yi % 4]![xi % 2];
+  };
+  const segment = (grid: Uint8Array, a: readonly number[], b: readonly number[]): void => {
+    let x0 = Math.round(a[0]!);
+    let y0 = Math.round(a[1]!);
+    const x1 = Math.round(b[0]!);
+    const y1 = Math.round(b[1]!);
+    const dx = Math.abs(x1 - x0);
+    const dy = -Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1;
+    const sy = y0 < y1 ? 1 : -1;
+    let err = dx + dy;
+    for (;;) {
+      dot(grid, x0, y0);
+      if (x0 === x1 && y0 === y1) break;
+      const e2 = 2 * err;
+      if (e2 >= dy) {
+        err += dy;
+        x0 += sx;
+      }
+      if (e2 <= dx) {
+        err += dx;
+        y0 += sy;
+      }
+    }
+  };
+  const mark = (grid: Uint8Array, p: readonly number[]): void => {
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++) dot(grid, p[0]! + dx, p[1]! + dy);
+  };
+
+  segment(path, FIELD_V.home, FIELD_V.first);
+  segment(path, FIELD_V.first, FIELD_V.second);
+  segment(path, FIELD_V.second, FIELD_V.third);
+  segment(path, FIELD_V.third, FIELD_V.home);
+  mark(base, FIELD_V.home);
+  mark(bases.first ? run : base, FIELD_V.first);
+  mark(bases.second ? run : base, FIELD_V.second);
+  mark(bases.third ? run : base, FIELD_V.third);
+
+  // 진루 애니: 홈→목표 베이스 경로를 따라 이동하는 밝은 점.
+  if (anim?.runners?.length) {
+    const wp = [FIELD_V.home, FIELD_V.first, FIELD_V.second, FIELD_V.third, FIELD_V.home];
+    const endIdx = { first: 1, second: 2, third: 3, home: 4 } as const;
+    for (const rnr of anim.runners) {
+      const end = endIdx[rnr.toBase];
+      const s = Math.max(0, Math.min(1, rnr.t)) * end;
+      const i = Math.min(end - 1, Math.floor(s));
+      const f = s - i;
+      mark(run, [
+        wp[i]![0]! + (wp[i + 1]![0]! - wp[i]![0]!) * f,
+        wp[i]![1]! + (wp[i + 1]![1]! - wp[i]![1]!) * f,
+      ]);
+    }
+  }
+
+  const rows: string[] = [];
+  for (let r = 0; r < FIELD_ROWS; r++) {
+    let line = "";
+    for (let c = 0; c < FIELD_COLS; c++) {
+      const idx = r * FIELD_COLS + c;
+      const val = path[idx]! | base[idx]! | run[idx]!;
+      if (val === 0) {
+        line += " ";
+        continue;
+      }
+      const glyph = String.fromCharCode(0x2800 + val);
+      if (run[idx]) line += pc.bold(pc.yellow(glyph));
+      else if (base[idx]) line += pc.cyan(glyph);
+      else line += pc.dim(glyph);
+    }
+    rows.push(`   ${line}`);
+  }
+  return rows;
 }
 
 function compactDiamond(bases: { first: boolean; second: boolean; third: boolean }): string {
@@ -305,6 +406,19 @@ export function inningLabel(inning: number, topBottom: "top" | "bottom"): string
   return `${inning}회${topBottom === "top" ? "초" : "말"}`;
 }
 
+// 대형 숫자 색. 득점 플래시 중인 쪽은 팀색↔볼드 화이트로 몇 번 깜빡인다.
+function flashColor(
+  name: string,
+  side: "away" | "home",
+  flash?: RenderAnim["flash"]
+): (s: string) => string {
+  if (flash && flash.side === side) {
+    const on = Math.floor((1 - flash.level) * 8) % 2 === 0;
+    if (on) return (s) => pc.bold(pc.white(s));
+  }
+  return teamFg(name);
+}
+
 // 대형 스코어보드 헤더 (normal/wide). 좌=원정 대형 숫자, 우=홈 대형 숫자,
 // 가운데=경기 상태(이닝/공격/아웃 등). 배너 1줄 + 숫자 5줄 = 6줄 반환.
 function scoreHeaderBig(
@@ -314,10 +428,10 @@ function scoreHeaderBig(
   homeScore: number,
   centerLines: string[],
   innerWidth: number,
-  opts: { awayTag?: string; homeTag?: string } = {}
+  opts: { awayTag?: string; homeTag?: string; flash?: RenderAnim["flash"] } = {}
 ): string[] {
-  const awayBig = bigDigits(awayScore, teamFg(awayName));
-  const homeBig = bigDigits(homeScore, teamFg(homeName));
+  const awayBig = bigDigits(awayScore, flashColor(awayName, "away", opts.flash));
+  const homeBig = bigDigits(homeScore, flashColor(homeName, "home", opts.flash));
 
   // 좌/우 존은 대칭, 가운데는 나머지. 좁은 normal 에서도 최소 폭 확보.
   const side = Math.min(22, Math.max(12, Math.floor((innerWidth - 16) / 2)));
@@ -519,6 +633,7 @@ interface RenderCtx {
   rightInner?: number;
   historyOffset: number;
   recentViewport: number;
+  anim?: RenderAnim;
 }
 
 function recentSectionHeader(offset: number, viewport: number, total: number): string {
@@ -551,11 +666,12 @@ function renderStartedBodyWide(game: NormalizedGame, ctx: RenderCtx, rightInner:
       game.awayScore,
       game.homeScore,
       startedCenterLines(game),
-      WIDE_LEFT_INNER
+      WIDE_LEFT_INNER,
+      { flash: ctx.anim?.flash }
     )
   );
   left.push("");
-  left.push(...diamondLines(game.bases));
+  left.push(...diamondField(game.bases, ctx.anim));
   left.push(`  ${compactCountLine(game.ball, game.strike, game.out)}`);
   left.push("");
   const inningLines = inningLineSection(game, { ...ctx, mode: "normal" });
@@ -604,11 +720,12 @@ function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): string[] {
         game.awayScore,
         game.homeScore,
         startedCenterLines(game),
-        ctx.innerWidth - 2
+        ctx.innerWidth - 2,
+        { flash: ctx.anim?.flash }
       )
     );
     body.push("");
-    body.push(...diamondLines(game.bases));
+    body.push(...diamondField(game.bases, ctx.anim));
     body.push(`  ${compactCountLine(game.ball, game.strike, game.out)}`);
     body.push("");
   }
@@ -864,6 +981,13 @@ export function recentViewportForMode(mode: LayoutMode): number {
   return 5;
 }
 
+// LIVE 인디케이터. pulse(0..1) 가 오면 ● 밝기가 맥동, 정적 렌더면 기본 초록.
+function livePulseTag(pulse?: number): string {
+  if (pulse == null) return pc.green("● LIVE");
+  const glyph = pulse > 0.5 ? pc.bold(pc.green("●")) : pc.dim(pc.green("●"));
+  return `${glyph} ${pc.green("LIVE")}`;
+}
+
 export function renderGame(
   game: NormalizedGame,
   opts: {
@@ -871,13 +995,15 @@ export function renderGame(
     multiGame?: boolean;
     layout?: LayoutMode | "auto";
     historyOffset?: number;
+    anim?: RenderAnim;
   } = {}
 ): string {
   const stale = opts.staleSec ?? 0;
   const cols = detectColumns();
   const mode = pickLayoutMode(cols, opts.layout);
   const innerWidth = frameWidthFor(mode, cols);
-  const headerStatus = HEADER_LABEL[game.status](game);
+  const headerStatus =
+    game.status === "STARTED" ? livePulseTag(opts.anim?.pulse) : HEADER_LABEL[game.status](game);
   const venue = game.stadium ? pc.dim(` · ${game.stadium}`) : "";
   const staleTag = stale > 0 ? pc.yellow(` ⚠ stale ${stale}s`) : "";
   const title = `KBO · ${headerStatus}${venue}${staleTag}`;
@@ -887,6 +1013,7 @@ export function renderGame(
     innerWidth,
     historyOffset: opts.historyOffset ?? 0,
     recentViewport: recentViewportForMode(mode),
+    anim: opts.anim,
   };
   if (mode === "wide") {
     // frame() 의 내용 폭 예산은 innerWidth-2 (좌우 "│ " … " │" 인셋). 우측 컬럼을
