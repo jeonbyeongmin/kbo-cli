@@ -88,28 +88,50 @@ function teamBanner(name: string): string {
   return fn ? fn(pc.bold(label)) : pc.bold(`▐${label}▌`);
 }
 
-// 5행 3열 블록 숫자 폰트. 실제 전광판 느낌의 대형 점수 렌더용.
-const BIG_FONT: Record<string, string[]> = {
-  "0": ["███", "█ █", "█ █", "█ █", "███"],
-  "1": [" █ ", "██ ", " █ ", " █ ", "███"],
-  "2": ["███", "  █", "███", "█  ", "███"],
-  "3": ["███", "  █", "███", "  █", "███"],
-  "4": ["█ █", "█ █", "███", "  █", "  █"],
-  "5": ["███", "█  ", "███", "  █", "███"],
-  "6": ["███", "█  ", "███", "█ █", "███"],
-  "7": ["███", "  █", "  █", "  █", "  █"],
-  "8": ["███", "█ █", "███", "█ █", "███"],
-  "9": ["███", "█ █", "███", "  █", "███"],
-  " ": ["   ", "   ", "   ", "   ", "   "],
+// 4×8 픽셀 숫자 폰트 — 하프블록(▀▄█)으로 4행 렌더. 기존 3×5 █ 폰트보다
+// 도트 밀도가 2배라 실제 전광판 LED 질감이 난다.
+const BIG_FONT_PIXELS: Record<string, string[]> = {
+  "0": ["####", "#..#", "#..#", "#..#", "#..#", "#..#", "#..#", "####"],
+  "1": ["..#.", ".##.", "..#.", "..#.", "..#.", "..#.", "..#.", ".###"],
+  "2": ["####", "...#", "...#", "####", "#...", "#...", "#...", "####"],
+  "3": ["####", "...#", "...#", ".###", "...#", "...#", "...#", "####"],
+  "4": ["#..#", "#..#", "#..#", "####", "...#", "...#", "...#", "...#"],
+  "5": ["####", "#...", "#...", "####", "...#", "...#", "...#", "####"],
+  "6": ["####", "#...", "#...", "####", "#..#", "#..#", "#..#", "####"],
+  "7": ["####", "...#", "...#", "...#", "...#", "...#", "...#", "...#"],
+  "8": ["####", "#..#", "#..#", "####", "#..#", "#..#", "#..#", "####"],
+  "9": ["####", "#..#", "#..#", "####", "...#", "...#", "...#", "####"],
+  " ": ["....", "....", "....", "....", "....", "....", "....", "...."],
 };
 
-// 정수를 5행 블록 숫자로. 각 자리 3폭 + 자리 사이 1칸 공백.
+export const BIG_DIGIT_ROWS = 4;
+
+// 픽셀 2행 → 하프블록 1행: 상+하 █, 상 ▀, 하 ▄.
+function toHalfBlocks(pixels: string[]): string[] {
+  const rows: string[] = [];
+  for (let r = 0; r < pixels.length; r += 2) {
+    let line = "";
+    for (let c = 0; c < pixels[r]!.length; c++) {
+      const top = pixels[r]![c] === "#";
+      const bottom = pixels[r + 1]?.[c] === "#";
+      line += top && bottom ? "█" : top ? "▀" : bottom ? "▄" : " ";
+    }
+    rows.push(line);
+  }
+  return rows;
+}
+
+const BIG_FONT: Record<string, string[]> = Object.fromEntries(
+  Object.entries(BIG_FONT_PIXELS).map(([k, v]) => [k, toHalfBlocks(v)])
+);
+
+// 정수를 4행 하프블록 숫자로. 각 자리 4폭 + 자리 사이 1칸 공백.
 export function bigDigits(n: number, color: (s: string) => string): string[] {
   const s = String(n);
-  const rows = ["", "", "", "", ""];
+  const rows = Array.from({ length: BIG_DIGIT_ROWS }, () => "");
   for (let ci = 0; ci < s.length; ci++) {
     const glyph = BIG_FONT[s[ci]!] ?? BIG_FONT[" "]!;
-    for (let i = 0; i < 5; i++) rows[i] += (ci > 0 ? " " : "") + glyph[i];
+    for (let i = 0; i < BIG_DIGIT_ROWS; i++) rows[i] += (ci > 0 ? " " : "") + glyph[i];
   }
   return rows.map((r) => color(r));
 }
@@ -362,17 +384,18 @@ const BRAILLE_DOTS = [
   [0x40, 0x80],
 ];
 
-// 야구 내야를 브라유로 래스터라이즈한다. path(베이스라인)·base(빈 베이스)·
-// run(주자/이동 점) 3 레이어를 셀 단위로 OR 한 뒤 우선순위 색(run>base>path)으로 칠한다.
+// 야구장을 브라유로 래스터라이즈한다. path(베이스라인/마운드)·fence(외야 펜스)·
+// run(진루 애니 점) 3 레이어를 셀 단위로 OR 한 뒤 우선순위 색(run>fence>path)으로
+// 칠하고, 베이스 위치는 브라유 대신 문자 글리프(◆/◇/⌂)로 치환해 또렷하게 표시한다.
 const FIELD_W = 30;
-const FIELD_H = 28;
+const FIELD_H = 32;
 const FIELD_COLS = FIELD_W / 2; // 15
-const FIELD_ROWS = FIELD_H / 4; // 7
+const FIELD_ROWS = FIELD_H / 4; // 8
 const FIELD_V = {
-  home: [15, 26],
-  first: [28, 13],
-  second: [15, 1],
-  third: [2, 13],
+  home: [15, 29],
+  first: [27, 17],
+  second: [15, 6],
+  third: [3, 17],
 } as const;
 
 function diamondField(
@@ -380,7 +403,7 @@ function diamondField(
   anim?: RenderAnim
 ): string[] {
   const path = new Uint8Array(FIELD_COLS * FIELD_ROWS);
-  const base = new Uint8Array(FIELD_COLS * FIELD_ROWS);
+  const fence = new Uint8Array(FIELD_COLS * FIELD_ROWS);
   const run = new Uint8Array(FIELD_COLS * FIELD_ROWS);
 
   const dot = (grid: Uint8Array, x: number, y: number): void => {
@@ -418,14 +441,26 @@ function diamondField(
       for (let dx = -1; dx <= 1; dx++) dot(grid, p[0]! + dx, p[1]! + dy);
   };
 
+  // 내야 베이스라인.
   segment(path, FIELD_V.home, FIELD_V.first);
   segment(path, FIELD_V.first, FIELD_V.second);
   segment(path, FIELD_V.second, FIELD_V.third);
   segment(path, FIELD_V.third, FIELD_V.home);
-  mark(base, FIELD_V.home);
-  mark(bases.first ? run : base, FIELD_V.first);
-  mark(bases.second ? run : base, FIELD_V.second);
-  mark(bases.third ? run : base, FIELD_V.third);
+  // 마운드 — 내야 중앙의 점.
+  dot(path, 14, 17);
+  dot(path, 16, 17);
+  dot(path, 15, 18);
+  // 외야 펜스 — 좌우 파울 폴에서 가운데 담장으로 이어지는 아크 (2차 베지어).
+  // 베이스라인(y17)·2루(y6) 와 겹치지 않게 위쪽에 얕게 띄운다.
+  const fA = [1, 8] as const;
+  const fC = [15, -6] as const; // control point (화면 밖 위쪽)
+  const fB = [29, 8] as const;
+  for (let t = 0; t <= 1.001; t += 0.02) {
+    const mt = 1 - t;
+    const x = mt * mt * fA[0] + 2 * mt * t * fC[0] + t * t * fB[0];
+    const y = mt * mt * fA[1] + 2 * mt * t * fC[1] + t * t * fB[1];
+    dot(fence, x, y);
+  }
 
   // 진루 애니: 홈→목표 베이스 경로를 따라 이동하는 밝은 점.
   if (anim?.runners?.length) {
@@ -443,24 +478,37 @@ function diamondField(
     }
   }
 
-  const rows: string[] = [];
+  // 셀 단위 렌더 후 베이스 위치를 문자 글리프로 치환.
+  const cells: string[][] = [];
   for (let r = 0; r < FIELD_ROWS; r++) {
-    let line = "";
+    const rowCells: string[] = [];
     for (let c = 0; c < FIELD_COLS; c++) {
       const idx = r * FIELD_COLS + c;
-      const val = path[idx]! | base[idx]! | run[idx]!;
+      const val = path[idx]! | fence[idx]! | run[idx]!;
       if (val === 0) {
-        line += " ";
+        rowCells.push(" ");
         continue;
       }
       const glyph = String.fromCharCode(0x2800 + val);
-      if (run[idx]) line += pc.bold(pc.yellow(glyph));
-      else if (base[idx]) line += pc.cyan(glyph);
-      else line += pc.dim(glyph);
+      if (run[idx]) rowCells.push(pc.bold(pc.yellow(glyph)));
+      else if (fence[idx]) rowCells.push(pc.green(pc.dim(glyph)));
+      else rowCells.push(pc.dim(glyph));
     }
-    rows.push(`   ${line}`);
+    cells.push(rowCells);
   }
-  return rows;
+  const baseCell = (v: readonly number[]) =>
+    [Math.floor(v[1]! / 4), Math.floor(v[0]! / 2)] as const;
+  const putBase = (v: readonly number[], occupied: boolean) => {
+    const [r, c] = baseCell(v);
+    cells[r]![c] = occupied ? pc.bold(pc.yellow("◆")) : pc.dim("◇");
+  };
+  putBase(FIELD_V.first, bases.first);
+  putBase(FIELD_V.second, bases.second);
+  putBase(FIELD_V.third, bases.third);
+  const [hr, hc] = baseCell(FIELD_V.home);
+  cells[hr]![hc] = pc.cyan("⌂");
+
+  return cells.map((rowCells) => `   ${rowCells.join("")}`);
 }
 
 function compactDiamond(bases: { first: boolean; second: boolean; third: boolean }): string {
@@ -497,7 +545,8 @@ function flashColor(
 }
 
 // 대형 스코어보드 헤더 (normal/wide). 좌=원정 대형 숫자, 우=홈 대형 숫자,
-// 가운데=경기 상태(이닝/공격/아웃 등). 배너 1줄 + 숫자 5줄 = 6줄 반환.
+// 가운데=경기 상태(이닝/공격/아웃 등), 양끝=팀색 세로 스트립.
+// 배너 1줄 + 숫자 4줄 = 5줄 반환.
 function scoreHeaderBig(
   awayName: string,
   homeName: string,
@@ -509,6 +558,9 @@ function scoreHeaderBig(
 ): string[] {
   const awayBig = bigDigits(awayScore, flashColor(awayName, "away", opts.flash));
   const homeBig = bigDigits(homeScore, flashColor(homeName, "home", opts.flash));
+  // 팀색 배경 세로 스트립 — 전광판 프레임 느낌 + 팀 식별 강화.
+  const stripAway = (TEAM_COLOR[awayName] ?? pc.dim)(" ");
+  const stripHome = (TEAM_COLOR[homeName] ?? pc.dim)(" ");
 
   // 좌/우 존은 대칭, 가운데는 나머지. 좁은 normal 에서도 최소 폭 확보.
   const side = Math.min(22, Math.max(12, Math.floor((innerWidth - 16) / 2)));
@@ -521,11 +573,11 @@ function scoreHeaderBig(
   const bannerRow = padEnd(bannerLeft, innerWidth - visualWidth(bannerRight)) + bannerRight;
 
   const rows = [bannerRow];
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < BIG_DIGIT_ROWS; i++) {
     // 원정 숫자는 가운데 쪽으로 우측정렬, 홈 숫자는 가운데 쪽으로 좌측정렬 —
-    // 실제 전광판처럼 두 점수가 가운데를 마주보게.
-    const leftCell = padEnd(padStart(awayBig[i]!, side - 3), side);
-    const rightCell = padStart(padEnd(homeBig[i]!, side - 3), side);
+    // 실제 전광판처럼 두 점수가 가운데를 마주보게. 바깥쪽 끝에 팀색 스트립.
+    const leftCell = stripAway + padEnd(padStart(awayBig[i]!, side - 4), side - 1);
+    const rightCell = padStart(padEnd(homeBig[i]!, side - 4), side - 1) + stripHome;
     const centerCell = centerAlign(centerLines[i] ?? "", center);
     rows.push(leftCell + centerCell + rightCell);
   }
@@ -547,12 +599,12 @@ function scoreHeaderCompact(
   return [row(awayName, awayScore, awaySuffix), row(homeName, homeScore, homeSuffix)];
 }
 
-// STARTED 가운데 열: 이닝 / 공격 방향 / 아웃카운트를 세로로.
+// STARTED 가운데 열: 이닝 / 공격 방향 / 아웃카운트를 세로로 (숫자 4행에 맞춤).
 function startedCenterLines(game: NormalizedGame): string[] {
   const inning = pc.bold(inningLabel(game.inning, game.topBottom));
   const attack = game.topBottom === "top" ? pc.cyan("◀ 공격") : pc.cyan("공격 ▶");
   const outs = `${pc.red("●".repeat(game.out))}${pc.dim("○".repeat(Math.max(0, 3 - game.out)))} ${pc.dim(`${game.out}아웃`)}`;
-  return ["", inning, attack, outs, ""];
+  return ["", inning, attack, outs];
 }
 
 // 미니 박스 패널. wide 우측 컬럼의 타자/투수 카드용.
@@ -975,7 +1027,7 @@ function resultTags(game: NormalizedGame): { awayTag?: string; homeTag?: string 
   if (game.winner === "DRAW") return { awayTag: pc.dim("무"), homeTag: pc.dim("무") };
   return {};
 }
-const RESULT_CENTER = ["", "", pc.bold("경기 종료"), "", ""];
+const RESULT_CENTER = ["", pc.bold("경기 종료"), "", ""];
 
 function boxscoreLines(game: NormalizedGame): string[] {
   if (!game.homeRheb || !game.awayRheb) return [];
@@ -1134,7 +1186,7 @@ function readyCenterLines(game: NormalizedGame): string[] {
         ? pc.yellow("경기 중단")
         : pc.cyan("경기 전");
   const time = game.gameDateTime ? game.gameDateTime.slice(11, 16) : "";
-  return ["", statusText, time ? pc.dim(time) : "", "", ""];
+  return ["", statusText, time ? pc.dim(time) : "", ""];
 }
 
 function readyHeader(game: NormalizedGame, innerWidth: number, compact: boolean): string[] {
