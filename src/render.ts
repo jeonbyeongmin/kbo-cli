@@ -5,8 +5,10 @@ import type {
   GameStatus,
   NormalizedGame,
   PitcherStats,
+  RHEB,
   ScheduleGame,
 } from "./types.ts";
+import { winRateBar } from "./widgets.ts";
 
 const TEAM_HEX: Record<string, string> = {
   LG: "#C30452",
@@ -624,13 +626,16 @@ function labelValueRows(rows: [string, string | null | undefined][]): string[] {
 function inningLineSection(
   game: NormalizedGame,
   ctx: RenderCtx,
-  opts: { sparkline?: boolean } = {}
+  opts: { sparkline?: boolean; rheb?: { away: RHEB; home: RHEB } | null } = {}
 ): string[] {
   if (game.inningLine.away.length === 0) return [];
   const innings = game.inningLine.away.length;
   const sparkline = opts.sparkline ?? ctx.mode !== "compact";
   // compact 에선 4회 단위로 줄바꿈해 좁은 폭에서도 정렬 유지.
   const chunkSize = ctx.mode === "compact" ? 4 : innings;
+  // 라이브 R/H/E/B 열 — 실제 전광판처럼 이닝 숫자 오른쪽에 붙인다 (compact 는 요약줄).
+  const rhebCols = ctx.mode !== "compact" && opts.rheb ? opts.rheb : null;
+  const rhebCells = (r: RHEB) => [r.r, r.h, r.e, r.b].map((n) => String(n).padStart(2)).join(" ");
   const out: string[] = [];
   for (let i = 0; i < innings; i += chunkSize) {
     const len = Math.min(chunkSize, innings - i);
@@ -645,9 +650,14 @@ function inningLineSection(
       .slice(i, i + len)
       .map((v) => v.padStart(2))
       .join(" ");
-    out.push(`  ${pc.dim(padEnd("회", 6))} ${pc.dim(headerCells)}`);
-    out.push(`  ${padEnd(game.awayTeamName, 6)} ${awaySlice}`);
-    out.push(`  ${padEnd(game.homeTeamName, 6)} ${homeSlice}`);
+    const rhebHead = rhebCols
+      ? `   ${["R", "H", "E", "B"].map((c) => c.padStart(2)).join(" ")}`
+      : "";
+    const rhebAway = rhebCols ? pc.bold(`   ${rhebCells(rhebCols.away)}`) : "";
+    const rhebHome = rhebCols ? pc.bold(`   ${rhebCells(rhebCols.home)}`) : "";
+    out.push(`  ${pc.dim(padEnd("회", 6))} ${pc.dim(headerCells + rhebHead)}`);
+    out.push(`  ${padEnd(game.awayTeamName, 6)} ${awaySlice}${rhebAway}`);
+    out.push(`  ${padEnd(game.homeTeamName, 6)} ${homeSlice}${rhebHome}`);
     // 득점 스파크라인 — 숫자 표 아래 팀 컬러 막대로 흐름을 한눈에.
     if (sparkline) {
       const awayBar = inningBars(game.inningLine.away.slice(i, i + len), teamFg(game.awayTeamName));
@@ -657,7 +667,29 @@ function inningLineSection(
     }
     if (i + chunkSize < innings) out.push("");
   }
+  // compact: 열을 붙일 폭이 없어 마지막에 한 줄 요약.
+  if (ctx.mode === "compact" && opts.rheb) {
+    const { away, home } = opts.rheb;
+    out.push(pc.dim(`  H ${away.h}-${home.h}  E ${away.e}-${home.e}  B ${away.b}-${home.b}`));
+  }
   return out;
+}
+
+// STARTED 라이브 R/H/E/B — 양쪽 다 있을 때만 이닝표에 병합.
+function liveRheb(game: NormalizedGame): { away: RHEB; home: RHEB } | null {
+  if (game.status !== "STARTED" || !game.awayRheb || !game.homeRheb) return null;
+  return { away: game.awayRheb, home: game.homeRheb };
+}
+
+// 승률 바 섹션 라인 (STARTED 전용). winRate 없으면 빈 배열.
+function winRateLines(game: NormalizedGame, width: number): string[] {
+  if (game.status !== "STARTED" || !game.winRate) return [];
+  const bar = winRateBar(
+    { name: game.awayTeamName, rate: game.winRate.away, color: teamFg(game.awayTeamName) },
+    { name: game.homeTeamName, rate: game.winRate.home, color: teamFg(game.homeTeamName) },
+    width
+  );
+  return bar ? [`  ${bar}`] : [];
 }
 
 interface RenderCtx {
@@ -746,10 +778,23 @@ function renderStartedBodyWide(
     },
     {
       id: "inning",
-      lines: prefixGap(inningLineSection(game, { ...ctx, mode: "normal" })),
-      alt: prefixGap(inningLineSection(game, { ...ctx, mode: "normal" }, { sparkline: false })),
+      lines: prefixGap(
+        inningLineSection(game, { ...ctx, mode: "normal" }, { rheb: liveRheb(game) })
+      ),
+      alt: prefixGap(
+        inningLineSection(
+          game,
+          { ...ctx, mode: "normal" },
+          { sparkline: false, rheb: liveRheb(game) }
+        )
+      ),
     },
   ];
+  // 승률 바는 전광판 바로 아래.
+  leftSections.splice(1, 0, {
+    id: "winrate",
+    lines: prefixGap(winRateLines(game, WIDE_LEFT_INNER - 2)),
+  });
   const rightSections: Section[] = [
     {
       id: "batter",
@@ -767,7 +812,12 @@ function renderStartedBodyWide(
     },
     { id: "recent", lines: [] },
   ];
-  const leftFit = fitBody(leftSections, ctx.bodyBudget, null, ["diamond", "inning", "inning"]);
+  const leftFit = fitBody(leftSections, ctx.bodyBudget, null, [
+    "winrate",
+    "diamond",
+    "inning",
+    "inning",
+  ]);
   const rightFit = fitBody(rightSections, ctx.bodyBudget, recentFlex(game, ctx, rightInner), [
     "batter",
     "pitcher",
@@ -837,14 +887,34 @@ function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): FittedBody {
   });
   sections.push({
     id: "inning",
-    lines: prefixGap(inningLineSection(game, ctx)),
-    alt: compact ? undefined : prefixGap(inningLineSection(game, ctx, { sparkline: false })),
+    lines: prefixGap(inningLineSection(game, ctx, { rheb: liveRheb(game) })),
+    alt: compact
+      ? undefined
+      : prefixGap(inningLineSection(game, ctx, { sparkline: false, rheb: liveRheb(game) })),
   });
   sections.push({ id: "recent", lines: [] });
 
+  // 승률 바 — 전광판 바로 아래 (compact 는 폭이 좁아 생략).
+  if (!compact) {
+    sections.splice(1, 0, {
+      id: "winrate",
+      lines: prefixGap(winRateLines(game, ctx.innerWidth - 4)),
+    });
+  }
+
   const degrade = compact
     ? ["batter", "pitcher", "inning"]
-    : ["inning", "batter", "pitcher", "diamond", "batter", "pitcher", "inning", "header"];
+    : [
+        "inning",
+        "batter",
+        "pitcher",
+        "winrate",
+        "diamond",
+        "batter",
+        "pitcher",
+        "inning",
+        "header",
+      ];
   return fitBody(sections, ctx.bodyBudget, recentFlex(game, ctx, ctx.innerWidth - 4), degrade);
 }
 
