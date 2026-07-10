@@ -9,6 +9,7 @@ import {
   todayDate,
 } from "./api.ts";
 import { readCache, writeCache } from "./cache.ts";
+import { sanitizeChatText } from "./chat.ts";
 import { cmdConfig, loadConfig } from "./config.ts";
 import { STATUS_RANK, matchesTeam, pickStatusGame, renderOneline } from "./oneline.ts";
 import {
@@ -39,6 +40,7 @@ interface Args {
   help: boolean;
   statsView: "standings" | "batting" | "pitching";
   layout?: LayoutMode | "auto";
+  nick?: string;
   // 개발용: fixture 파일로 watch (라이브 경기 없을 때), --status 로 상태 강제.
   fixture?: string;
   statusOverride?: GameStatus;
@@ -61,6 +63,7 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--game") args.game = argv[++i];
     else if (a === "--date") args.date = argv[++i] ?? args.date;
     else if (a === "--interval") args.intervalSec = Math.max(1, Number(argv[++i]) || 5);
+    else if (a === "--nick") args.nick = argv[++i];
     else if (a === "--fixture") args.fixture = argv[++i];
     else if (a === "--status") args.statusOverride = argv[++i] as GameStatus;
     else if (a === "--layout") {
@@ -101,6 +104,7 @@ function printHelp(): void {
 
 옵션:
   --interval <sec>   폴링 주기 (기본 5, config 폴백)
+  --nick <이름>      watch 채팅 닉네임 (기본 랜덤 손님 닉)
   --date <YYYY-MM-DD>
   --layout <mode>    auto/compact/normal/wide (기본 auto, config 폴백)
   --fixture <path>   watch: fixture 파일로 관전 (개발용, --status STARTED 로 라이브 화면 강제)
@@ -120,6 +124,7 @@ status 종료 코드:
 라이브/통계 화면 키:
   q          종료
   r          즉시 새로고침
+  c          watch: 채팅 열기 (Enter 전송, Esc 닫기 — 같은 경기 시청자 오픈 채팅)
   ←/→        watch: 진행중 경기 전환 · stats: 정렬/카테고리 전환 · config: 값 변경
   ↑/↓        stats 순위: 뷰 토글 · stats 리더보드: 행 스크롤 · config: 항목 이동
   h/l        stats: 컬럼 가로 스크롤
@@ -138,8 +143,15 @@ async function cmdToday(args: Args): Promise<void> {
   console.log(renderScheduleList(games, args.date, favoriteTeam));
 }
 
+// 채팅 닉네임 — --nick 정리(제어문자 제거·12자 제한), 미지정 시 랜덤 손님 닉.
+function resolveNick(raw?: string): string {
+  const clean = raw ? sanitizeChatText(raw, 12).trim() : "";
+  return clean || `손님${Math.floor(Math.random() * 9000) + 1000}`;
+}
+
 async function cmdWatch(args: Args): Promise<void> {
   const cfg = loadConfig();
+  const nick = resolveNick(args.nick);
 
   // 개발용 fixture 관전 — 라이브 경기가 없어도 watch 화면을 확인할 수 있다.
   if (args.fixture) {
@@ -158,6 +170,7 @@ async function cmdWatch(args: Args): Promise<void> {
       initialGameIndex: 0,
       liveGames: [sched],
       layout: args.layout ?? cfg.layout,
+      nick,
       fixtureRelay: fx.relay,
     });
     return;
@@ -221,6 +234,7 @@ async function cmdWatch(args: Args): Promise<void> {
     initialGameIndex: initialIndex,
     liveGames: enriched,
     layout: args.layout ?? cfg.layout,
+    nick,
   });
 }
 

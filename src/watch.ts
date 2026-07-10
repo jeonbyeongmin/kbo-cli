@@ -1,4 +1,5 @@
 import { fetchRelay, fetchSchedule, isPlayable, normalize, todayDate } from "./api.ts";
+import { CHAT_TOPIC_PREFIX, ChatClient, type ChatMessage, sanitizeChatText } from "./chat.ts";
 import {
   type LayoutMode,
   type RenderAnim,
@@ -40,9 +41,14 @@ interface WatchOptions {
   initialGameIndex: number;
   liveGames: ScheduleGame[];
   layout?: LayoutMode | "auto";
+  // 채팅 닉네임 (--nick, 미지정 시 랜덤 손님 닉).
+  nick: string;
   // 개발용: 네트워크 대신 이 relay 를 그대로 사용 (라이브 경기 없을 때 fixture 관전).
   fixtureRelay?: TextRelayData;
 }
+
+const CHAT_INPUT_MAX = 200;
+const CHAT_LOG_MAX = 100;
 
 export async function watch(opts: WatchOptions): Promise<void> {
   let idx = opts.initialGameIndex;
@@ -99,7 +105,9 @@ export async function watch(opts: WatchOptions): Promise<void> {
     const live = lastGame?.status === "STARTED" && !!process.stdout.isTTY;
     if (live && !animTimer) {
       animTimer = setInterval(() => {
-        if (!stopped) draw();
+        // 채팅 입력 중엔 8fps 리드로우를 멈춘다 — 매 프레임 커서를 숨겼다
+        // 보이는 동작이 IME 한글 조합 표시를 흔든다.
+        if (!stopped && !chatOpen) draw();
       }, ANIM_INTERVAL_MS);
     } else if (!live && animTimer) {
       clearInterval(animTimer);
@@ -125,10 +133,53 @@ export async function watch(opts: WatchOptions): Promise<void> {
 
   let offResize: (() => void) | null = null;
 
+  // 채팅 상태 — 패널이 열려 있는 동안 문자 키는 입력 버퍼로 간다.
+  let chatOpen = false;
+  let chatInput = "";
+  let chatMessages: ChatMessage[] = [];
+  let chatClient: ChatClient | null = null;
+
+  const chatTopic = () => `${CHAT_TOPIC_PREFIX}/${liveGames[idx]?.gameId ?? "lobby"}`;
+
+  const openChat = () => {
+    chatOpen = true;
+    if (!chatClient) {
+      chatClient = new ChatClient({
+        nick: opts.nick,
+        onMessage: (m) => {
+          chatMessages.push(m);
+          if (chatMessages.length > CHAT_LOG_MAX) chatMessages.shift();
+          if (chatOpen) draw();
+        },
+        onState: () => {
+          if (chatOpen) draw();
+        },
+      });
+      chatClient.connect(chatTopic());
+    }
+    draw();
+  };
+
+  // 경기 전환 시 채팅방도 새 경기 토픽으로 이동, 이전 방 로그는 비운다.
+  const switchChatRoom = () => {
+    if (!chatClient) return;
+    chatMessages = [];
+    chatClient.setTopic(chatTopic());
+  };
+
+  const sendChat = () => {
+    const text = chatInput.trim();
+    if (!text || !chatClient) return;
+    // 전송 성공 시에만 버퍼를 비운다 — 표시는 브로커 echo 로 확인.
+    if (chatClient.send(text)) chatInput = "";
+    draw();
+  };
+
   const cleanup = () => {
     if (timer) clearTimeout(timer);
     if (animTimer) clearInterval(animTimer);
     if (offResize) offResize();
+    if (chatClient) chatClient.close();
     if (process.stdin.isTTY && process.stdin.setRawMode) process.stdin.setRawMode(false);
     process.stdin.pause();
     process.stdout.write(SHOW_CURSOR + EXIT_ALT);
@@ -157,15 +208,11 @@ export async function watch(opts: WatchOptions): Promise<void> {
     process.stdin.resume();
     process.stdin.setEncoding("utf8");
     process.stdin.on("data", (data: string) => {
-      if (data === "q" || data === "Q" || data === "\x03") {
+      if (data === "\x03") {
         exitClean();
         return;
       }
-      if (data === "r" || data === "R") {
-        historyOffset = 0;
-        void poll();
-        return;
-      }
+      // 화살표는 채팅 입력 중에도 동작 — 히스토리 스크롤/경기 전환은 텍스트가 아니다.
       if (data === KEY_UP) {
         setHistoryOffset(historyOffset + 1);
         draw();
@@ -181,6 +228,7 @@ export async function watch(opts: WatchOptions): Promise<void> {
         lastGame = null;
         historyOffset = 0;
         resetAnim();
+        switchChatRoom();
         void poll();
         return;
       }
@@ -189,7 +237,43 @@ export async function watch(opts: WatchOptions): Promise<void> {
         lastGame = null;
         historyOffset = 0;
         resetAnim();
+        switchChatRoom();
         void poll();
+        return;
+      }
+      if (chatOpen) {
+        if (data === "\x1b") {
+          chatOpen = false;
+          draw();
+          return;
+        }
+        if (data === "\r" || data === "\n") {
+          sendChat();
+          return;
+        }
+        if (data === "\x7f" || data === "\b") {
+          chatInput = [...chatInput].slice(0, -1).join("");
+          draw();
+          return;
+        }
+        const clean = sanitizeChatText(data, CHAT_INPUT_MAX);
+        if (clean) {
+          chatInput = [...(chatInput + clean)].slice(0, CHAT_INPUT_MAX).join("");
+          draw();
+        }
+        return;
+      }
+      if (data === "q" || data === "Q") {
+        exitClean();
+        return;
+      }
+      if (data === "r" || data === "R") {
+        historyOffset = 0;
+        void poll();
+        return;
+      }
+      if (data === "c" || data === "C") {
+        openChat();
         return;
       }
     });
@@ -201,6 +285,7 @@ export async function watch(opts: WatchOptions): Promise<void> {
   const draw = () => {
     if (stopped) return;
     let body: string;
+    let chatCursor: { row: number; col: number } | undefined;
     if (lastGame) {
       // RESULT/READY/BEFORE/SUSPENDED 는 변할 일이 거의 없어 stale 경고가 의미 없음 — STARTED 만 표시.
       const stale = Math.floor((Date.now() - lastFetch) / 1000);
@@ -213,9 +298,18 @@ export async function watch(opts: WatchOptions): Promise<void> {
         historyOffset,
         anim: currentAnim(),
         others: liveGames.filter((g) => g.gameId !== current?.gameId),
+        chat: chatOpen
+          ? {
+              nick: opts.nick,
+              status: chatClient?.state ?? "connecting",
+              messages: chatMessages,
+              input: chatInput,
+            }
+          : undefined,
       });
       body = frame.text;
       lastViewport = frame.recentViewport || lastViewport;
+      chatCursor = frame.cursor;
     } else if (lastError) {
       body = `\n  ${lastError}\n`;
     } else {
@@ -224,13 +318,19 @@ export async function watch(opts: WatchOptions): Promise<void> {
     // 다른 경기 정보는 프레임 내 티커 행이 담당 — 별도 컨텍스트 줄 불필요.
     const out = `${body}\n`;
 
-    // overwrite frame: home cursor, clear each line as we go
-    process.stdout.write(HOME);
+    // overwrite frame: home cursor, clear each line as we go.
+    // 리페인트 동안 커서가 화면을 뛰어다니는 게 보이지 않게 잠시 숨긴다.
+    process.stdout.write(HIDE_CURSOR + HOME);
     const lines = out.split("\n");
     for (const line of lines) {
       process.stdout.write(`${CLEAR_LINE + line}\n`);
     }
     process.stdout.write(CLEAR_AFTER);
+    // 채팅 입력 중엔 실제 커서를 입력 위치에 노출 — 터미널 IME 가 조합 중인
+    // 한글을 커서 자리에 그려주므로 이게 없으면 조합 글자가 안 보인다.
+    if (chatCursor) {
+      process.stdout.write(`\x1b[${chatCursor.row};${chatCursor.col}H${SHOW_CURSOR}`);
+    }
   };
 
   const poll = async () => {

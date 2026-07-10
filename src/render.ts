@@ -333,13 +333,23 @@ export function frame(
   body: string[],
   footer: string,
   innerWidth: number = W,
-  ticker?: string
+  ticker?: string,
+  chat?: { title: string; rows: string[] }
 ): string[] {
   const top = `┌─ ${title} ${"─".repeat(Math.max(0, innerWidth - visualWidth(title) - 3))}┐`;
   const bot = `└${"─".repeat(innerWidth)}┘`;
   const lines = [top];
   for (const line of body) {
     lines.push(`│ ${padEnd(line, innerWidth - 2)} │`);
+  }
+  // 채팅 패널 — 본문 아래 제목 달린 전용 구역.
+  if (chat) {
+    lines.push(
+      `├─ ${chat.title} ${"─".repeat(Math.max(0, innerWidth - visualWidth(chat.title) - 3))}┤`
+    );
+    for (const row of chat.rows) {
+      lines.push(`│ ${padEnd(trimToWidth(row, innerWidth - 2), innerWidth - 2)} │`);
+    }
   }
   // 멀티게임 티커 — 푸터 위 전용 행.
   if (ticker) {
@@ -368,6 +378,54 @@ export function tickerLine(others: ScheduleGame[]): string {
     return `${colorTeam(g.awayTeamName)}${score} ${colorTeam(g.homeTeamName)} ${status}`;
   });
   return segs.join(pc.dim("  ·  "));
+}
+
+// ─── 채팅 패널 (watch 전용) ─────────────────────────────────────
+// 메시지 CHAT_VIEW 줄 + 입력 1줄 고정 높이. watch 가 ChatClient 상태를 넘긴다.
+export const CHAT_VIEW = 4;
+// bodyBudget 예약분: 구분선 1 + 메시지 CHAT_VIEW + 입력 1.
+export const CHAT_RESERVED_ROWS = CHAT_VIEW + 2;
+
+export interface ChatRenderState {
+  nick: string;
+  status: "connecting" | "connected" | "reconnecting" | "closed";
+  messages: { nick: string; text: string; ts: number }[];
+  input: string;
+}
+
+const CHAT_STATUS_LABEL: Record<ChatRenderState["status"], string> = {
+  connecting: "연결 중…",
+  connected: "연결됨",
+  reconnecting: "재연결 중…",
+  closed: "연결 끊김",
+};
+
+function chatBlock(
+  chat: ChatRenderState,
+  width: number
+): { title: string; rows: string[]; cursorCol: number } {
+  const dot = chat.status === "connected" ? pc.green("●") : pc.yellow("○");
+  const title = `채팅 ${dot} ${pc.dim(CHAT_STATUS_LABEL[chat.status])}`;
+  const rows: string[] = [];
+  const view = chat.messages.slice(-CHAT_VIEW);
+  for (const m of view) {
+    const t = new Date(m.ts).toTimeString().slice(0, 5);
+    rows.push(`${pc.dim(t)} ${pc.cyan(pc.bold(m.nick))}  ${m.text}`);
+  }
+  if (view.length === 0) {
+    rows.push(pc.dim("  같은 경기를 보는 사람들과의 오픈 채팅입니다."));
+  }
+  while (rows.length < CHAT_VIEW) rows.push("");
+  // 입력 줄 — 길어지면 앞을 잘라 커서 쪽(끝)이 보이게 유지. 커서는 그리지 않고
+  // watch 가 실제 터미널 커서를 cursorCol 에 놓는다 — IME 조합 미리보기가 그
+  // 위치에 그려져 한글 입력이 실시간으로 보인다.
+  const hint = pc.dim(`  ${chat.nick} · Enter 전송 · Esc 닫기`);
+  const avail = Math.max(8, width - 4 - visualWidth(hint));
+  let input = chat.input;
+  while (visualWidth(input) > avail) input = [...input].slice(1).join("");
+  rows.push(`${pc.cyan("›")} ${input} ${hint}`);
+  // "│ " + "› " = 4칸 뒤에 입력이 시작 → 커서(1-based)는 5 + 입력 폭.
+  return { title, rows, cursorCol: 5 + visualWidth(input) };
 }
 
 // 렌더에 얹는 모션 상태. watch 의 애니메이션 루프가 프레임마다 계산해 넘긴다.
@@ -1306,6 +1364,7 @@ export interface RenderGameOpts {
   anim?: RenderAnim;
   rows?: number; // 높이 강제 (fixture/테스트용) — 미지정 시 detectRows()
   others?: ScheduleGame[]; // 다른 경기들 — 있으면 푸터 위 티커 행으로
+  chat?: ChatRenderState; // 채팅 패널 열림 상태 — 본문 아래 고정 높이 구역
 }
 
 // watch 루프용: 프레임 문자열과 함께 실제 적용된 최근 플레이 viewport 를 돌려준다
@@ -1313,7 +1372,7 @@ export interface RenderGameOpts {
 export function renderGameFrame(
   game: NormalizedGame,
   opts: RenderGameOpts = {}
-): { text: string; recentViewport: number } {
+): { text: string; recentViewport: number; cursor?: { row: number; col: number } } {
   const stale = opts.staleSec ?? 0;
   const cols = detectColumns();
   const mode = pickLayoutMode(cols, opts.layout);
@@ -1327,9 +1386,10 @@ export function renderGameFrame(
   const ticker = opts.others && opts.others.length > 0 ? tickerLine(opts.others) : undefined;
 
   // 본문 높이 예산: 프레임 4줄(상단/구분선/푸터/하단) + watch draw 의 말미 빈 줄 1
-  // + 커서 여유 1 + 티커 2줄(구분선+행) 을 빼고 남는 줄. rows=0(비 TTY)이면 무제한.
+  // + 커서 여유 1 + 티커 2줄(구분선+행) + 채팅 구역을 빼고 남는 줄.
+  // rows=0(비 TTY)이면 무제한.
   const rows = opts.rows ?? detectRows();
-  const reserved = 6 + (ticker ? 2 : 0);
+  const reserved = 6 + (ticker ? 2 : 0) + (opts.chat ? CHAT_RESERVED_ROWS : 0);
   const bodyBudget = rows > 0 ? Math.max(8, rows - reserved) : Number.POSITIVE_INFINITY;
 
   const ctx: RenderCtx = {
@@ -1348,10 +1408,15 @@ export function renderGameFrame(
   const body = BODY_RENDERERS[game.status](game, ctx);
 
   const switchHint = opts.multiGame ? "  ←/→:경기전환" : "";
-  const footer = `q:종료  r:새로고침${switchHint}  · ${timeStr(game.fetchedAt)}`;
+  const footer = `q:종료  r:새로고침  c:채팅${switchHint}  · ${timeStr(game.fetchedAt)}`;
+  const chat = opts.chat ? chatBlock(opts.chat, innerWidth) : undefined;
+  // 채팅 입력 줄의 터미널 커서 좌표 (1-based, HOME 기준). 프레임 구성:
+  // 상단 1 + 본문 + 채팅 구분선 1 + 메시지 CHAT_VIEW + 입력 줄.
+  const cursor = chat ? { row: body.lines.length + CHAT_VIEW + 3, col: chat.cursorCol } : undefined;
   return {
-    text: frame(title, body.lines, footer, innerWidth, ticker).join("\n"),
+    text: frame(title, body.lines, footer, innerWidth, ticker, chat).join("\n"),
     recentViewport: body.viewport,
+    cursor,
   };
 }
 
