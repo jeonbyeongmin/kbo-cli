@@ -8,7 +8,7 @@ import type {
   RHEB,
   ScheduleGame,
 } from "./types.ts";
-import { winRateBar } from "./widgets.ts";
+import { strikeZoneChart, winRateBar } from "./widgets.ts";
 
 const TEAM_HEX: Record<string, string> = {
   LG: "#C30452",
@@ -681,6 +681,12 @@ function liveRheb(game: NormalizedGame): { away: RHEB; home: RHEB } | null {
   return { away: game.awayRheb, home: game.homeRheb };
 }
 
+// 스트라이크존 차트 섹션 라인 (STARTED 전용). 위치 데이터 없으면 빈 배열.
+function zoneLines(game: NormalizedGame, width: number): string[] {
+  if (game.status !== "STARTED") return [];
+  return strikeZoneChart(game.currentAtBatPitches, width).map((l) => `  ${l}`);
+}
+
 // 승률 바 섹션 라인 (STARTED 전용). winRate 없으면 빈 배열.
 function winRateLines(game: NormalizedGame, width: number): string[] {
   if (game.status !== "STARTED" || !game.winRate) return [];
@@ -810,6 +816,7 @@ function renderStartedBodyWide(
         ...panel("투수", toPanelBody(renderPitcherSection(game.pitcherStats, false)), rightInner),
       ],
     },
+    { id: "zone", lines: prefixGap(zoneLines(game, rightInner - 2)) },
     { id: "recent", lines: [] },
   ];
   const leftFit = fitBody(leftSections, ctx.bodyBudget, null, [
@@ -819,6 +826,7 @@ function renderStartedBodyWide(
     "inning",
   ]);
   const rightFit = fitBody(rightSections, ctx.bodyBudget, recentFlex(game, ctx, rightInner), [
+    "zone",
     "batter",
     "pitcher",
   ]);
@@ -885,6 +893,10 @@ function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): FittedBody {
     lines: prefixGap(renderPitcherSection(game.pitcherStats, compact)),
     alt: compact ? undefined : prefixGap(renderPitcherSection(game.pitcherStats, true)),
   });
+  // 투구 차트 — 투수 카드 아래 (compact 는 폭이 좁아 생략).
+  if (!compact) {
+    sections.push({ id: "zone", lines: prefixGap(zoneLines(game, ctx.innerWidth - 4)) });
+  }
   sections.push({
     id: "inning",
     lines: prefixGap(inningLineSection(game, ctx, { rheb: liveRheb(game) })),
@@ -905,6 +917,7 @@ function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): FittedBody {
   const degrade = compact
     ? ["batter", "pitcher", "inning"]
     : [
+        "zone",
         "inning",
         "batter",
         "pitcher",
