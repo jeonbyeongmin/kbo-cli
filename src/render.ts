@@ -145,7 +145,9 @@ export type LayoutMode = "compact" | "normal" | "wide";
 
 export const NARROW_THRESHOLD = 80;
 export const WIDE_THRESHOLD = 120;
-const WIDE_LEFT_INNER = 56;
+// 좌측 컬럼: 다이아몬드(27) + 간격(5) + 투구 차트(13+2) + 투구 리스트(≥20) 가
+// 한 줄에 들어가야 하는 폭 — 56 이면 리스트가 통째로 숨는다.
+const WIDE_LEFT_INNER = 70;
 const WIDE_GUTTER = 2;
 const WIDE_RIGHT_MIN = 24;
 
