@@ -984,16 +984,40 @@ function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): FittedBody {
       alt: ["", `  ${compactDiamond(game.bases)}`, count],
     });
   }
-  sections.push({
-    id: "batter",
-    lines: prefixGap(renderBatterSection(game.batterStats, compact)),
-    alt: compact ? undefined : prefixGap(renderBatterSection(game.batterStats, true)),
-  });
-  sections.push({
-    id: "pitcher",
-    lines: prefixGap(renderPitcherSection(game.pitcherStats, compact)),
-    alt: compact ? undefined : prefixGap(renderPitcherSection(game.pitcherStats, true)),
-  });
+  if (compact) {
+    sections.push({ id: "batter", lines: prefixGap(renderBatterSection(game.batterStats, true)) });
+    sections.push({
+      id: "pitcher",
+      lines: prefixGap(renderPitcherSection(game.pitcherStats, true)),
+    });
+  } else {
+    // 타자+투수 스택. 폭이 되면 우측에 타순 패널을 나란히 붙여 wide 와 정보량을
+    // 맞춘다. 폭이 모자라면 타순은 아래 별도 섹션 (높이 부족 시 가장 먼저 강등).
+    const bp = [
+      ...renderBatterSection(game.batterStats, false),
+      "",
+      ...renderPitcherSection(game.pitcherStats, false),
+    ];
+    const bpAlt = [
+      ...renderBatterSection(game.batterStats, true),
+      "",
+      ...renderPitcherSection(game.pitcherStats, true),
+    ];
+    const bpW = Math.max(...bp.map(visualWidth));
+    const sideW = Math.min(44, ctx.innerWidth - 4 - bpW - 2);
+    const sideLineup = sideW >= 32 ? lineupPanelLines(game, sideW) : [];
+    sections.push({
+      id: "players",
+      lines: prefixGap(sideLineup.length > 0 ? joinColumns(bp, sideLineup, bpW) : bp),
+      alt: prefixGap(bpAlt),
+    });
+    if (sideLineup.length === 0) {
+      sections.push({
+        id: "lineup",
+        lines: prefixGap(lineupPanelLines(game, Math.min(44, ctx.innerWidth - 4))),
+      });
+    }
+  }
   sections.push({
     id: "inning",
     lines: prefixGap(inningLineSection(game, ctx, { rheb: liveRheb(game) })),
@@ -1013,17 +1037,7 @@ function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): FittedBody {
 
   const degrade = compact
     ? ["batter", "pitcher", "inning"]
-    : [
-        "inning",
-        "batter",
-        "pitcher",
-        "winrate",
-        "diamond",
-        "batter",
-        "pitcher",
-        "inning",
-        "header",
-      ];
+    : ["lineup", "inning", "players", "winrate", "diamond", "players", "inning", "header"];
   return fitBody(sections, ctx.bodyBudget, recentFlex(game, ctx, ctx.innerWidth - 4), degrade);
 }
 
