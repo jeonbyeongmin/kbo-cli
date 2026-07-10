@@ -387,16 +387,20 @@ const BRAILLE_DOTS = [
 // 야구장을 브라유로 래스터라이즈한다. path(베이스라인/마운드)·fence(외야 펜스)·
 // run(진루 애니 점) 3 레이어를 셀 단위로 OR 한 뒤 우선순위 색(run>fence>path)으로
 // 칠하고, 베이스 위치는 브라유 대신 문자 글리프(◆/◇/⌂)로 치환해 또렷하게 표시한다.
-const FIELD_W = 30;
-const FIELD_H = 32;
-const FIELD_COLS = FIELD_W / 2; // 15
-const FIELD_ROWS = FIELD_H / 4; // 8
+const FIELD_W = 48;
+const FIELD_H = 44;
+const FIELD_COLS = FIELD_W / 2; // 24
+const FIELD_ROWS = FIELD_H / 4; // 11
 const FIELD_V = {
-  home: [15, 29],
-  first: [27, 17],
-  second: [15, 6],
-  third: [3, 17],
+  home: [24, 41],
+  first: [43, 25],
+  second: [24, 9],
+  third: [5, 25],
 } as const;
+// 다이아몬드 렌더 폭 (들여쓰기 3 + 셀 24) — 옆에 투구 차트를 붙일 때 기준.
+const FIELD_DISPLAY_W = 3 + FIELD_COLS;
+// 다이아몬드와 투구 차트 사이 간격.
+const FIELD_ZONE_GAP = 5;
 
 function diamondField(
   bases: { first: boolean; second: boolean; third: boolean },
@@ -447,14 +451,14 @@ function diamondField(
   segment(path, FIELD_V.second, FIELD_V.third);
   segment(path, FIELD_V.third, FIELD_V.home);
   // 마운드 — 내야 중앙의 점.
-  dot(path, 14, 17);
-  dot(path, 16, 17);
-  dot(path, 15, 18);
+  dot(path, 23, 27);
+  dot(path, 25, 27);
+  dot(path, 24, 28);
   // 외야 펜스 — 좌우 파울 폴에서 가운데 담장으로 이어지는 아크 (2차 베지어).
-  // 베이스라인(y17)·2루(y6) 와 겹치지 않게 위쪽에 얕게 띄운다.
-  const fA = [1, 8] as const;
-  const fC = [15, -6] as const; // control point (화면 밖 위쪽)
-  const fB = [29, 8] as const;
+  // 베이스라인·2루와 겹치지 않게 위쪽에 얕게 띄운다.
+  const fA = [2, 12] as const;
+  const fC = [24, -10] as const; // control point (화면 밖 위쪽)
+  const fB = [46, 12] as const;
   for (let t = 0; t <= 1.001; t += 0.02) {
     const mt = 1 - t;
     const x = mt * mt * fA[0] + 2 * mt * t * fC[0] + t * t * fB[0];
@@ -768,10 +772,20 @@ function lineupPanelLines(game: NormalizedGame, width: number): string[] {
   return panel(`${teamName} 타순`, rows, width);
 }
 
-// 스트라이크존 차트 섹션 라인 (STARTED 전용). 위치 데이터 없으면 빈 배열.
-function zoneLines(game: NormalizedGame, width: number): string[] {
-  if (game.status !== "STARTED") return [];
-  return strikeZoneChart(game.currentAtBatPitches, width).map((l) => `  ${l}`);
+// 다이아몬드 + 스트라이크존 차트 결합 블록. 다이아몬드 우측 빈 공간에 차트를
+// 나란히 붙여 세로 비용 없이 투구 위치를 보여준다. 차트가 없으면 다이아몬드만.
+function fieldLines(game: NormalizedGame, ctx: RenderCtx, width: number): string[] {
+  const field = diamondField(game.bases, ctx.anim);
+  const zoneWidth = width - FIELD_DISPLAY_W - FIELD_ZONE_GAP;
+  const zone =
+    game.status === "STARTED" && zoneWidth >= 13
+      ? strikeZoneChart(game.currentAtBatPitches, zoneWidth)
+      : [];
+  if (zone.length === 0) return field;
+  // 차트(8줄)를 다이아몬드(12줄) 세로 중앙에 맞춘다.
+  const padTop = Math.max(0, Math.floor((field.length - zone.length) / 2));
+  const centered = [...Array.from({ length: padTop }, () => ""), ...zone];
+  return joinColumns(field, centered, FIELD_DISPLAY_W, FIELD_ZONE_GAP);
 }
 
 // 승률 바 섹션 라인 (STARTED 전용). winRate 없으면 빈 배열.
@@ -860,7 +874,7 @@ function renderStartedBodyWide(
       id: "diamond",
       lines: [
         "",
-        ...diamondField(game.bases, ctx.anim),
+        ...fieldLines(game, ctx, WIDE_LEFT_INNER),
         `  ${compactCountLine(game.ball, game.strike, game.out)}`,
       ],
       alt: [
@@ -903,7 +917,6 @@ function renderStartedBodyWide(
         ...panel("투수", toPanelBody(renderPitcherSection(game.pitcherStats, false)), rightInner),
       ],
     },
-    { id: "zone", lines: prefixGap(zoneLines(game, rightInner - 2)) },
     { id: "lineup", lines: prefixGap(lineupPanelLines(game, rightInner)) },
     { id: "recent", lines: [] },
   ];
@@ -915,7 +928,6 @@ function renderStartedBodyWide(
   ]);
   const rightFit = fitBody(rightSections, ctx.bodyBudget, recentFlex(game, ctx, rightInner), [
     "lineup",
-    "zone",
     "batter",
     "pitcher",
   ]);
@@ -968,7 +980,7 @@ function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): FittedBody {
     });
     sections.push({
       id: "diamond",
-      lines: ["", ...diamondField(game.bases, ctx.anim), count],
+      lines: ["", ...fieldLines(game, ctx, ctx.innerWidth - 2), count],
       alt: ["", `  ${compactDiamond(game.bases)}`, count],
     });
   }
@@ -982,10 +994,6 @@ function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): FittedBody {
     lines: prefixGap(renderPitcherSection(game.pitcherStats, compact)),
     alt: compact ? undefined : prefixGap(renderPitcherSection(game.pitcherStats, true)),
   });
-  // 투구 차트 — 투수 카드 아래 (compact 는 폭이 좁아 생략).
-  if (!compact) {
-    sections.push({ id: "zone", lines: prefixGap(zoneLines(game, ctx.innerWidth - 4)) });
-  }
   sections.push({
     id: "inning",
     lines: prefixGap(inningLineSection(game, ctx, { rheb: liveRheb(game) })),
@@ -1006,7 +1014,6 @@ function renderStartedBody(game: NormalizedGame, ctx: RenderCtx): FittedBody {
   const degrade = compact
     ? ["batter", "pitcher", "inning"]
     : [
-        "zone",
         "inning",
         "batter",
         "pitcher",

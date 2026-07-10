@@ -318,14 +318,14 @@ describe("renderGame 높이 인지 (rows 예산)", () => {
     }
   });
 
-  test("높은 터미널(rows 50) — 최근 플레이 viewport 가 확장돼 세로를 채움", () => {
+  test("높은 터미널(rows 60) — 최근 플레이 viewport 가 확장돼 세로를 채움", () => {
     const prev = process.env.COLUMNS;
     process.env.COLUMNS = "96";
     try {
-      const out = strip(renderGame(game(), { layout: "normal", rows: 50 }));
+      const out = strip(renderGame(game(), { layout: "normal", rows: 60 }));
       const shown = manyPlays.filter((p) => out.includes(p)).length;
       expect(shown).toBeGreaterThan(10);
-      expect(lineCount(out)).toBeLessThanOrEqual(50 - 2);
+      expect(lineCount(out)).toBeLessThanOrEqual(60 - 2);
     } finally {
       process.env.COLUMNS = prev;
     }
