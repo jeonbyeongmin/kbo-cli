@@ -23,7 +23,8 @@
 
 ## 데이터 소스 (비공식 API)
 
-- 일정: `GET /schedule/games?upperCategoryId=kbaseball&date=YYYY-MM-DD`
+- 일정: `GET /schedule/games?upperCategoryId=kbaseball&fromDate=YYYY-MM-DD&toDate=YYYY-MM-DD`
+  — `date=` 단일 파라미터는 2026-07 경 무공지 폐기 (200 이지만 항상 빈 배열).
 - 라이브: `GET /schedule/games/{gameId}/relay`
 - 통계: `GET /statistics/categories/kbo/seasons/{season}/...`
   — 통계 계열 `categoryId` 는 `kbo`, schedule 계열은 `kbaseball` 로 **다르다**.

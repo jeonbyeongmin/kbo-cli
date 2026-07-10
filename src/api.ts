@@ -56,8 +56,9 @@ async function getJson<T>(path: string, timeoutMs = 5000): Promise<T> {
 }
 
 export async function fetchSchedule(date: string, timeoutMs?: number): Promise<ScheduleGame[]> {
+  // date= 파라미터는 2026-07 경 무공지 폐기돼 항상 빈 배열을 반환 — fromDate/toDate 로 조회한다.
   const data = await getJson<{ games: ScheduleGame[] }>(
-    `/schedule/games?upperCategoryId=kbaseball&date=${date}`,
+    `/schedule/games?upperCategoryId=kbaseball&fromDate=${date}&toDate=${date}`,
     timeoutMs
   );
   return data.games.filter((g) => g.categoryId === "kbo" && g.homeTeamName && g.awayTeamName);
