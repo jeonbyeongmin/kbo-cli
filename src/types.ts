@@ -110,6 +110,38 @@ export interface TextRelayOption {
   type?: number;
   seqno?: number;
   currentGameState?: CurrentGameState;
+  // type===1 (투구) 옵션에만 실리는 투구 정보.
+  speed?: string | number | null; // 구속 km/h
+  stuff?: string | null; // 구종 (한글)
+  pitchResult?: string | null; // B볼 S헛스윙 T루킹 F파울 H타격
+  pitchNum?: number | null;
+}
+
+// 투구 위치 추적(PTS) 원소. 좌표·속도·가속도는 피트/초 단위 야구 관례 좌표계.
+export interface PtsPitch {
+  pitchId?: string;
+  inn?: number;
+  ballcount?: number; // textOptions 의 pitchNum 과 조인
+  crossPlateX?: number; // 플레이트 통과 수평 위치 (ft, 포수 시점)
+  crossPlateY?: number;
+  topSz?: number; // 스트라이크존 상한 (ft)
+  bottomSz?: number;
+  x0?: number;
+  y0?: number;
+  z0?: number;
+  vx0?: number;
+  vy0?: number;
+  vz0?: number;
+  ax?: number;
+  ay?: number;
+  az?: number;
+  stance?: string; // 타자 좌우 "L" | "R"
+}
+
+export interface MetricOption {
+  homeTeamWinRate?: number; // 0~100
+  awayTeamWinRate?: number;
+  wpaByPlate?: number;
 }
 
 export interface TextRelay {
@@ -118,6 +150,8 @@ export interface TextRelay {
   inn: number;
   homeOrAway: string;
   textOptions: TextRelayOption[];
+  ptsOptions?: PtsPitch[];
+  metricOption?: MetricOption;
 }
 
 export interface TextRelayData {
@@ -134,6 +168,31 @@ export interface TextRelayData {
   currentGameState: CurrentGameState;
   textRelays: TextRelay[];
   pitcherVsBatterCareerStats?: string;
+  lastValidMetricOption?: MetricOption;
+}
+
+// 현재 타석의 투구 하나 — 스트라이크존 차트/투구 리스트 렌더용.
+export interface PitchMark {
+  num: number; // 몇 구째
+  result: string; // pitchResult 코드 (B/S/T/F/H 등)
+  resultText: string; // "파울", "헛스윙" 등 원문에서 추출
+  stuff: string | null;
+  speedKmh: number | null;
+  x: number | null; // 플레이트 통과 수평 위치 (ft) — PTS 없으면 null
+  z: number | null; // 플레이트 통과 높이 (ft, 운동학 계산) — 실패 시 null
+  topSz: number;
+  bottomSz: number;
+  stance: string | null;
+}
+
+// 타순표 한 칸. 교체로 같은 batOrder 가 중복되면 seqno 최대(현재 선수)만 남긴다.
+export interface LineupSlot {
+  batOrder: number;
+  pos: string; // posName 첫 글자 ("중", "유" 등)
+  name: string;
+  pcode: string;
+  todayAvg: string | null;
+  hitAb: string | null; // "2-4" (안타-타수)
 }
 
 export interface TeamStat {
@@ -255,6 +314,10 @@ export interface NormalizedGame {
   pitcherStats: PitcherStats | null;
   recentPlays: string[];
   inningLine: { home: string[]; away: string[] };
+  winRate: { home: number; away: number } | null; // 승리 확률 (0~100)
+  currentAtBatPitches: PitchMark[]; // 현재(최신) 타석의 투구들, num 오름차순
+  lineups: { home: LineupSlot[]; away: LineupSlot[] } | null;
+  currentBatterPcode: string | null;
   status: GameStatus;
   fetchedAt: number;
   // 추가 메타 (schedule 에서 매핑). 없을 수 있음.

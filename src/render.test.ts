@@ -26,6 +26,10 @@ function makeStarted(overrides: Partial<NormalizedGame> = {}): NormalizedGame {
     pitcherStats: null,
     recentPlays: [],
     inningLine: { home: [], away: [] },
+    winRate: null,
+    currentAtBatPitches: [],
+    lineups: null,
+    currentBatterPcode: null,
     status: "STARTED",
     fetchedAt: 0,
     gameDateTime: "2026-05-02T18:30:00",
@@ -127,12 +131,15 @@ describe("renderGame 프레임 정사각 (모든 줄 동일 폭)", () => {
 });
 
 describe("renderGame STARTED 카운트 위치", () => {
-  test("normal — 다이아몬드 다음 줄에 한 줄 카운트", () => {
+  test("normal — 브라유 필드 다음 줄에 한 줄 카운트", () => {
     const out = strip(renderGame(makeStarted(), { layout: "normal" }));
     const lines = out.split("\n");
-    const diamondIdx = lines.findIndex((l) => l.includes("⌂"));
-    expect(diamondIdx).toBeGreaterThan(-1);
-    expect(lines[diamondIdx + 1]).toMatch(/B .*S .*O /);
+    // 브라유 필드가 존재하고, 그 마지막 줄 바로 다음이 카운트 한 줄.
+    const isField = (l: string): boolean => /[⠀-⣿]/.test(l);
+    const fieldIdxs = lines.map((l, i) => (isField(l) ? i : -1)).filter((i) => i >= 0);
+    expect(fieldIdxs.length).toBeGreaterThan(0);
+    const lastField = fieldIdxs[fieldIdxs.length - 1]!;
+    expect(lines[lastField + 1]).toMatch(/B .*S .*O /);
   });
 
   test("normal — 옛 5줄 countBlock 패턴 (별도 B/S/O 줄) 등장 X", () => {
@@ -161,6 +168,53 @@ describe("renderGame STARTED 카운트 위치", () => {
   test("compact — 기존 한 줄 카운트 그대로", () => {
     const out = strip(renderGame(makeStarted(), { layout: "compact" }));
     expect(out).toMatch(/B .*S .*O /);
+  });
+});
+
+describe("renderGame 모션(anim)", () => {
+  const frameLineWidths = (out: string): number[] =>
+    out
+      .split("\n")
+      .filter((l) => /^[┌│├└]/.test(strip(l)))
+      .map(visualWidth);
+
+  for (const layout of ["normal", "wide"] as const) {
+    test(`${layout} — anim 프레임도 정사각 유지`, () => {
+      const prev = process.env.COLUMNS;
+      process.env.COLUMNS = layout === "wide" ? "140" : "96";
+      try {
+        const out = renderGame(
+          makeStarted({ bases: { first: true, second: true, third: false } }),
+          {
+            layout,
+            anim: {
+              pulse: 0.9,
+              flash: { side: "home", level: 0.7 },
+              runners: [{ toBase: "second", t: 0.5 }],
+            },
+          }
+        );
+        expect(new Set(frameLineWidths(out)).size).toBe(1);
+      } finally {
+        if (prev === undefined) Reflect.deleteProperty(process.env, "COLUMNS");
+        else process.env.COLUMNS = prev;
+      }
+    });
+  }
+
+  test("주자 이동은 t 에 따라 필드 프레임이 달라진다", () => {
+    const prev = process.env.COLUMNS;
+    process.env.COLUMNS = "96";
+    try {
+      const g = makeStarted();
+      const at = (t: number): string =>
+        strip(renderGame(g, { layout: "normal", anim: { runners: [{ toBase: "second", t }] } }));
+      // 색이 아니라 브라유 글리프 자체가 이동하므로 strip 후에도 달라야 한다.
+      expect(at(0.2)).not.toBe(at(0.9));
+    } finally {
+      if (prev === undefined) Reflect.deleteProperty(process.env, "COLUMNS");
+      else process.env.COLUMNS = prev;
+    }
   });
 });
 
@@ -224,5 +278,101 @@ describe("renderGame STARTED 최근 플레이 historyOffset", () => {
     expect(out).toContain("p4");
     expect(out).not.toContain("p1");
     expect(out).not.toContain("p5");
+  });
+});
+
+describe("renderGame 높이 인지 (rows 예산)", () => {
+  const manyPlays = Array.from({ length: 40 }, (_, i) => `play${i + 1}`);
+  const game = () =>
+    makeStarted({
+      status: "STARTED",
+      recentPlays: manyPlays,
+      inningLine: {
+        away: ["0", "1", "0", "2", "0", "0", "0", "0", "0"],
+        home: ["1", "0", "0", "0", "0", "3", "0", "0", "-"],
+      },
+    });
+
+  const lineCount = (out: string): number => out.split("\n").length;
+
+  test("rows 미지정(비 TTY) — 기존 기본 viewport 유지", () => {
+    const prev = process.env.COLUMNS;
+    process.env.COLUMNS = "96";
+    try {
+      const out = strip(renderGame(game(), { layout: "normal" }));
+      const shown = manyPlays.filter((p) => out.includes(p)).length;
+      expect(shown).toBe(5); // normal 기본 viewport
+    } finally {
+      process.env.COLUMNS = prev;
+    }
+  });
+
+  test("낮은 터미널(rows 20) — 프레임이 예산 안으로 강등되고 잘리지 않음", () => {
+    const prev = process.env.COLUMNS;
+    process.env.COLUMNS = "96";
+    try {
+      const out = renderGame(game(), { layout: "normal", rows: 20 });
+      expect(lineCount(out)).toBeLessThanOrEqual(20 - 2); // 프레임 전체 ≤ rows - 여유
+    } finally {
+      process.env.COLUMNS = prev;
+    }
+  });
+
+  test("높은 터미널(rows 60) — 최근 플레이 viewport 가 확장돼 세로를 채움", () => {
+    const prev = process.env.COLUMNS;
+    process.env.COLUMNS = "96";
+    try {
+      const out = strip(renderGame(game(), { layout: "normal", rows: 60 }));
+      const shown = manyPlays.filter((p) => out.includes(p)).length;
+      expect(shown).toBeGreaterThan(10);
+      expect(lineCount(out)).toBeLessThanOrEqual(60 - 2);
+    } finally {
+      process.env.COLUMNS = prev;
+    }
+  });
+
+  test("극단적으로 낮은 터미널(rows 12) — 하드 트림으로도 예산 준수", () => {
+    const prev = process.env.COLUMNS;
+    process.env.COLUMNS = "96";
+    try {
+      const out = renderGame(game(), { layout: "normal", rows: 12 });
+      expect(lineCount(out)).toBeLessThanOrEqual(14); // budget floor(8) + frame 4 + 여유
+    } finally {
+      process.env.COLUMNS = prev;
+    }
+  });
+});
+
+describe("renderGame 멀티게임 티커", () => {
+  const other = {
+    gameId: "G2",
+    categoryId: "kbo",
+    homeTeamCode: "OB",
+    homeTeamName: "두산",
+    homeTeamScore: 5,
+    awayTeamCode: "LG",
+    awayTeamName: "LG",
+    awayTeamScore: 3,
+    statusCode: "STARTED",
+    statusInfo: "7회말",
+    gameDateTime: "2026-05-02T18:30:00",
+    cancel: false,
+    suspended: false,
+    currentInning: "7회말",
+  } as const;
+
+  test("others 가 있으면 푸터 위 티커 행이 생긴다", () => {
+    const out = strip(renderGame(makeStarted(), { layout: "normal", others: [other] }));
+    expect(out).toContain("3-5");
+    expect(out).toContain("●7회말");
+    // 구분선이 티커+푸터로 2개
+    const seps = out.split("\n").filter((l) => /^├─+┤$/.test(l));
+    expect(seps.length).toBe(2);
+  });
+
+  test("others 없으면 티커 행 없음", () => {
+    const out = strip(renderGame(makeStarted(), { layout: "normal" }));
+    const seps = out.split("\n").filter((l) => /^├─+┤$/.test(l));
+    expect(seps.length).toBe(1);
   });
 });

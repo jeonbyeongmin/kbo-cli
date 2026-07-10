@@ -23,7 +23,8 @@
 
 ## 데이터 소스 (비공식 API)
 
-- 일정: `GET /schedule/games?upperCategoryId=kbaseball&date=YYYY-MM-DD`
+- 일정: `GET /schedule/games?upperCategoryId=kbaseball&fromDate=YYYY-MM-DD&toDate=YYYY-MM-DD`
+  — `date=` 단일 파라미터는 2026-07 경 무공지 폐기 (200 이지만 항상 빈 배열).
 - 라이브: `GET /schedule/games/{gameId}/relay`
 - 통계: `GET /statistics/categories/kbo/seasons/{season}/...`
   — 통계 계열 `categoryId` 는 `kbo`, schedule 계열은 `kbaseball` 로 **다르다**.
@@ -39,6 +40,8 @@
 - 없으면 fixture 로 검증한다:
   - `bun run snapshot <gameId>` 로 상태별(BEFORE/STARTED/RESULT) 한두 개 캡처.
   - `bun run render:fixture [<path>]` 로 한 프레임 stdout 렌더.
+  - `bun run watch:fixture` 로 watch TUI 루프(애니메이션/키 입력/리사이즈)까지
+    라이브 상태로 확인 — 다른 캡처는 뒤에 `--fixture <path>` 를 붙여 덮어쓴다.
   - `--status STARTED` : RESULT 캡처로 라이브 위젯(다이아몬드/카운트/타자·투수) 강제 렌더.
   - `--stale <sec>` : stale 경고 강제.
 

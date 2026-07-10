@@ -3,13 +3,19 @@ import type {
   CurrentGameState,
   GameStatus,
   LineupPlayer,
+  LineupSlot,
+  MetricOption,
   NormalizedGame,
+  PitchMark,
   PitcherStats,
   PlayerRanking,
+  PtsPitch,
   RHEB,
   ScheduleGame,
   TeamStat,
+  TextRelay,
   TextRelayData,
+  TextRelayOption,
   TopPlayerCategory,
 } from "./types.ts";
 
@@ -56,8 +62,9 @@ async function getJson<T>(path: string, timeoutMs = 5000): Promise<T> {
 }
 
 export async function fetchSchedule(date: string, timeoutMs?: number): Promise<ScheduleGame[]> {
+  // date= 파라미터는 2026-07 경 무공지 폐기돼 항상 빈 배열을 반환 — fromDate/toDate 로 조회한다.
   const data = await getJson<{ games: ScheduleGame[] }>(
-    `/schedule/games?upperCategoryId=kbaseball&date=${date}`,
+    `/schedule/games?upperCategoryId=kbaseball&fromDate=${date}&toDate=${date}`,
     timeoutMs
   );
   return data.games.filter((g) => g.categoryId === "kbo" && g.homeTeamName && g.awayTeamName);
@@ -191,11 +198,21 @@ function buildPitcherStats(p: LineupPlayer | null): PitcherStats | null {
 // API 가 이닝 구분으로 끼워넣는 sentinel — 의미 없으니 항상 제거.
 const SENTINEL_RE = /^=+$/;
 
+// 투구 옵션(type===1)이면 구종·구속을 병기 — "1구 파울" → "1구 파울 · 슬라이더 127km/h".
+function pitchAnnotatedText(opt: TextRelayOption): string {
+  const txt = (opt.text ?? "").trim();
+  if (opt.type !== 1) return txt;
+  const stuff = typeof opt.stuff === "string" ? opt.stuff.trim() : "";
+  const speed = Number(opt.speed);
+  if (!stuff || !Number.isFinite(speed) || speed <= 0) return txt;
+  return `${txt} · ${stuff} ${speed}km/h`;
+}
+
 function collectRecentPlays(relay: TextRelayData, max = 100): string[] {
   const plays: { seq: number; text: string }[] = [];
   for (const ab of relay.textRelays) {
     for (const opt of ab.textOptions) {
-      const txt = (opt.text ?? "").trim();
+      const txt = pitchAnnotatedText(opt);
       if (!txt) continue;
       if (SENTINEL_RE.test(txt)) continue;
       plays.push({ seq: opt.seqno ?? 0, text: txt });
@@ -211,6 +228,114 @@ function collectRecentPlays(relay: TextRelayData, max = 100): string[] {
     if (out.length >= max) break;
   }
   return out;
+}
+
+// textRelays 를 최신(no 내림차순) 순으로. API 가 이미 정렬해 주지만 보장이 없어 방어적으로 정렬.
+function relaysNewestFirst(relay: TextRelayData): TextRelay[] {
+  return [...relay.textRelays].sort((a, b) => (b.no ?? 0) - (a.no ?? 0));
+}
+
+// 승리 확률. 최신 relay 의 metricOption 은 0/0 sentinel 일 수 있어 비0 첫 항목을 찾고,
+// 없으면 lastValidMetricOption 폴백. 그것도 0/0 이면 null (경기 초반/미제공).
+function pickWinRate(relay: TextRelayData): { home: number; away: number } | null {
+  const read = (m: MetricOption | undefined): { home: number; away: number } | null => {
+    if (!m) return null;
+    const home = Number(m.homeTeamWinRate);
+    const away = Number(m.awayTeamWinRate);
+    if (!Number.isFinite(home) || !Number.isFinite(away) || home + away <= 0) return null;
+    return { home, away };
+  };
+  for (const tr of relaysNewestFirst(relay)) {
+    const v = read(tr.metricOption);
+    if (v) return v;
+  }
+  return read(relay.lastValidMetricOption);
+}
+
+// PTS 운동학으로 플레이트 통과 높이(ft)를 계산. crossPlateY 평면 도달 시각 t 를
+// y(t)=y0+vy0·t+ay·t²/2 에서 구해 z(t) 를 평가한다. 데이터 결손/비물리 값은 null.
+function plateZ(p: PtsPitch): number | null {
+  const { y0, vy0, ay, z0, vz0, az, crossPlateY } = p;
+  if (y0 == null || vy0 == null || ay == null || z0 == null || vz0 == null || az == null)
+    return null;
+  const targetY = crossPlateY ?? 1.417; // 결측 시 플레이트 근처 기본값
+  const disc = vy0 * vy0 - 2 * ay * (y0 - targetY);
+  if (!(disc >= 0)) return null;
+  const t = ay !== 0 ? (-vy0 - Math.sqrt(disc)) / ay : (targetY - y0) / vy0;
+  if (!Number.isFinite(t) || t <= 0) return null;
+  const z = z0 + vz0 * t + (az * t * t) / 2;
+  return Number.isFinite(z) ? z : null;
+}
+
+const DEFAULT_SZ = { top: 3.4, bottom: 1.6 } as const;
+
+// 현재(최신) 타석의 투구들. type===1 textOptions 와 ptsOptions 를 pitchNum↔ballcount 로 조인.
+function parseCurrentAtBat(relay: TextRelayData): PitchMark[] {
+  for (const tr of relaysNewestFirst(relay)) {
+    const pitchOpts = tr.textOptions.filter((o) => o.type === 1 && o.pitchNum != null);
+    if (pitchOpts.length === 0) continue;
+    const pts = new Map<number, PtsPitch>();
+    for (const p of tr.ptsOptions ?? []) {
+      if (p.ballcount != null) pts.set(p.ballcount, p);
+    }
+    const marks: PitchMark[] = pitchOpts.map((o) => {
+      const p = pts.get(o.pitchNum!);
+      const speed = Number(o.speed);
+      const topSz = p?.topSz && p.topSz > 0 ? p.topSz : DEFAULT_SZ.top;
+      const bottomSz = p?.bottomSz && p.bottomSz > 0 ? p.bottomSz : DEFAULT_SZ.bottom;
+      return {
+        num: o.pitchNum!,
+        result: (o.pitchResult ?? "").trim(),
+        resultText: (o.text ?? "").trim().replace(/^\d+구\s*/, ""),
+        stuff: typeof o.stuff === "string" && o.stuff.trim() ? o.stuff.trim() : null,
+        speedKmh: Number.isFinite(speed) && speed > 0 ? speed : null,
+        x: p?.crossPlateX ?? null,
+        z: p ? plateZ(p) : null,
+        topSz,
+        bottomSz,
+        stance: p?.stance ?? null,
+      };
+    });
+    marks.sort((a, b) => a.num - b.num);
+    return marks;
+  }
+  return [];
+}
+
+// 타순표. 교체로 같은 batOrder 가 중복되면 seqno 최대(=현재 투입 선수)만 남긴다.
+function buildLineupSlots(batters: LineupPlayer[]): LineupSlot[] {
+  const byOrder = new Map<number, LineupPlayer>();
+  for (const p of batters) {
+    if (p.batOrder == null || p.batOrder < 1) continue;
+    const cur = byOrder.get(p.batOrder);
+    if (!cur || (p.seqno ?? 0) > (cur.seqno ?? 0)) byOrder.set(p.batOrder, p);
+  }
+  return [...byOrder.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([batOrder, p]) => ({
+      batOrder,
+      pos: (p.posName ?? "").slice(0, 1) || "-",
+      name: p.name,
+      pcode: p.pcode,
+      todayAvg: p.pa != null && p.pa > 0 ? fmtAvg(p.todayHra) : null,
+      hitAb: p.ab != null ? `${p.hit ?? 0}-${p.ab}` : null,
+    }));
+}
+
+function buildLineups(relay: TextRelayData): NormalizedGame["lineups"] {
+  const home = buildLineupSlots(relay.homeLineup?.batter ?? []);
+  const away = buildLineupSlots(relay.awayLineup?.batter ?? []);
+  if (home.length === 0 && away.length === 0) return null;
+  return { home, away };
+}
+
+// STARTED 중 schedule 에 rheb 가 없을 때 currentGameState 로 라이브 R/H/E/B 를 만든다.
+function rhebFromState(cs: CurrentGameState, side: "home" | "away", score: number): RHEB | null {
+  const h = Number(side === "home" ? cs.homeHit : cs.awayHit);
+  const e = Number(side === "home" ? cs.homeError : cs.awayError);
+  const b = Number(side === "home" ? cs.homeBallFour : cs.awayBallFour);
+  if (!Number.isFinite(h) || !Number.isFinite(e) || !Number.isFinite(b)) return null;
+  return { r: score, h, e, b };
 }
 
 function parseRheb(arr: number[] | null | undefined): RHEB | null {
@@ -269,6 +394,10 @@ export function normalize(schedule: ScheduleGame, relay: TextRelayData | null): 
       pitcherStats: null,
       recentPlays: [],
       inningLine: { home: [], away: [] },
+      winRate: null,
+      currentAtBatPitches: [],
+      lineups: null,
+      currentBatterPcode: null,
       status: schedule.statusCode,
       fetchedAt: Date.now(),
       ...scheduleMeta(schedule),
@@ -319,9 +448,18 @@ export function normalize(schedule: ScheduleGame, relay: TextRelayData | null): 
     pitcherStats: buildPitcherStats(pitcherPlayer),
     recentPlays: collectRecentPlays(relay),
     inningLine: { home: inningLineHome, away: inningLineAway },
+    winRate: pickWinRate(relay),
+    currentAtBatPitches: parseCurrentAtBat(relay),
+    lineups: buildLineups(relay),
+    currentBatterPcode: cs.batter?.trim() ? cs.batter : null,
     status: schedule.statusCode,
     fetchedAt: Date.now(),
     ...scheduleMeta(schedule),
+    // 라이브 중엔 schedule 의 rheb 가 비어있을 수 있어 currentGameState 로 보충.
+    homeRheb:
+      parseRheb(schedule.homeTeamRheb) ?? rhebFromState(cs, "home", Number(cs.homeScore ?? 0)),
+    awayRheb:
+      parseRheb(schedule.awayTeamRheb) ?? rhebFromState(cs, "away", Number(cs.awayScore ?? 0)),
   };
 }
 
