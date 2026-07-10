@@ -8,7 +8,7 @@ import type {
   RHEB,
   ScheduleGame,
 } from "./types.ts";
-import { strikeZoneChart, winRateBar } from "./widgets.ts";
+import { lineupRows, strikeZoneChart, winRateBar } from "./widgets.ts";
 
 const TEAM_HEX: Record<string, string> = {
   LG: "#C30452",
@@ -308,7 +308,8 @@ export function frame(
   title: string,
   body: string[],
   footer: string,
-  innerWidth: number = W
+  innerWidth: number = W,
+  ticker?: string
 ): string[] {
   const top = `┌─ ${title} ${"─".repeat(Math.max(0, innerWidth - visualWidth(title) - 3))}┐`;
   const bot = `└${"─".repeat(innerWidth)}┘`;
@@ -316,10 +317,33 @@ export function frame(
   for (const line of body) {
     lines.push(`│ ${padEnd(line, innerWidth - 2)} │`);
   }
+  // 멀티게임 티커 — 푸터 위 전용 행.
+  if (ticker) {
+    lines.push(`├${"─".repeat(innerWidth)}┤`);
+    lines.push(`│ ${padEnd(trimToWidth(ticker, innerWidth - 2), innerWidth - 2)} │`);
+  }
   lines.push(`├${"─".repeat(innerWidth)}┤`);
   lines.push(`│ ${padEnd(footer, innerWidth - 2)} │`);
   lines.push(bot);
   return lines;
+}
+
+// 다른 경기 요약 한 줄 — "두산 3-5 LG ●7회 · KT 1-0 SSG 종료".
+export function tickerLine(others: ScheduleGame[]): string {
+  const segs = others.map((g) => {
+    const isReady = g.statusCode === "READY" || g.statusCode === "BEFORE";
+    const status =
+      g.statusCode === "STARTED"
+        ? pc.green(`●${g.currentInning ?? "LIVE"}`)
+        : g.statusCode === "RESULT"
+          ? pc.dim("종료")
+          : isReady
+            ? pc.cyan(g.gameDateTime.slice(11, 16))
+            : pc.yellow(g.statusInfo || g.statusCode);
+    const score = isReady ? "" : ` ${g.awayTeamScore}-${g.homeTeamScore}`;
+    return `${colorTeam(g.awayTeamName)}${score} ${colorTeam(g.homeTeamName)} ${status}`;
+  });
+  return segs.join(pc.dim("  ·  "));
 }
 
 // 렌더에 얹는 모션 상태. watch 의 애니메이션 루프가 프레임마다 계산해 넘긴다.
@@ -681,6 +705,17 @@ function liveRheb(game: NormalizedGame): { away: RHEB; home: RHEB } | null {
   return { away: game.awayRheb, home: game.homeRheb };
 }
 
+// 공격팀 타순 패널 (wide 우측 전용). 라인업 미발표면 빈 배열.
+function lineupPanelLines(game: NormalizedGame, width: number): string[] {
+  if (game.status !== "STARTED" || !game.lineups) return [];
+  const side = game.topBottom === "top" ? "away" : "home";
+  const slots = game.lineups[side];
+  if (slots.length === 0) return [];
+  const teamName = side === "away" ? game.awayTeamName : game.homeTeamName;
+  const rows = lineupRows(slots, game.currentBatterPcode, teamFg(teamName), width - 4);
+  return panel(`${teamName} 타순`, rows, width);
+}
+
 // 스트라이크존 차트 섹션 라인 (STARTED 전용). 위치 데이터 없으면 빈 배열.
 function zoneLines(game: NormalizedGame, width: number): string[] {
   if (game.status !== "STARTED") return [];
@@ -817,6 +852,7 @@ function renderStartedBodyWide(
       ],
     },
     { id: "zone", lines: prefixGap(zoneLines(game, rightInner - 2)) },
+    { id: "lineup", lines: prefixGap(lineupPanelLines(game, rightInner)) },
     { id: "recent", lines: [] },
   ];
   const leftFit = fitBody(leftSections, ctx.bodyBudget, null, [
@@ -826,6 +862,7 @@ function renderStartedBodyWide(
     "inning",
   ]);
   const rightFit = fitBody(rightSections, ctx.bodyBudget, recentFlex(game, ctx, rightInner), [
+    "lineup",
     "zone",
     "batter",
     "pitcher",
@@ -1193,6 +1230,7 @@ export interface RenderGameOpts {
   historyOffset?: number;
   anim?: RenderAnim;
   rows?: number; // 높이 강제 (fixture/테스트용) — 미지정 시 detectRows()
+  others?: ScheduleGame[]; // 다른 경기들 — 있으면 푸터 위 티커 행으로
 }
 
 // watch 루프용: 프레임 문자열과 함께 실제 적용된 최근 플레이 viewport 를 돌려준다
@@ -1211,10 +1249,12 @@ export function renderGameFrame(
   const staleTag = stale > 0 ? pc.yellow(` ⚠ stale ${stale}s`) : "";
   const title = `KBO · ${headerStatus}${venue}${staleTag}`;
 
+  const ticker = opts.others && opts.others.length > 0 ? tickerLine(opts.others) : undefined;
+
   // 본문 높이 예산: 프레임 4줄(상단/구분선/푸터/하단) + watch draw 의 말미 빈 줄 1
-  // + 커서 여유 1 + 멀티게임 컨텍스트 1 을 빼고 남는 줄. rows=0(비 TTY)이면 무제한.
+  // + 커서 여유 1 + 티커 2줄(구분선+행) 을 빼고 남는 줄. rows=0(비 TTY)이면 무제한.
   const rows = opts.rows ?? detectRows();
-  const reserved = 6 + (opts.multiGame ? 1 : 0);
+  const reserved = 6 + (ticker ? 2 : 0);
   const bodyBudget = rows > 0 ? Math.max(8, rows - reserved) : Number.POSITIVE_INFINITY;
 
   const ctx: RenderCtx = {
@@ -1235,7 +1275,7 @@ export function renderGameFrame(
   const switchHint = opts.multiGame ? "  ←/→:경기전환" : "";
   const footer = `q:종료  r:새로고침${switchHint}  · ${timeStr(game.fetchedAt)}`;
   return {
-    text: frame(title, body.lines, footer, innerWidth).join("\n"),
+    text: frame(title, body.lines, footer, innerWidth, ticker).join("\n"),
     recentViewport: body.viewport,
   };
 }

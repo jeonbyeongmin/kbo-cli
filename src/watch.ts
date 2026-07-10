@@ -205,12 +205,14 @@ export async function watch(opts: WatchOptions): Promise<void> {
       // RESULT/READY/BEFORE/SUSPENDED 는 변할 일이 거의 없어 stale 경고가 의미 없음 — STARTED 만 표시.
       const stale = Math.floor((Date.now() - lastFetch) / 1000);
       const isLive = lastGame.status === "STARTED";
+      const current = liveGames[idx];
       const frame = renderGameFrame(lastGame, {
         staleSec: isLive && stale > staleThreshold ? stale : 0,
         multiGame: liveGames.length > 1,
         layout: opts.layout,
         historyOffset,
         anim: currentAnim(),
+        others: liveGames.filter((g) => g.gameId !== current?.gameId),
       });
       body = frame.text;
       lastViewport = frame.recentViewport || lastViewport;
@@ -219,11 +221,8 @@ export async function watch(opts: WatchOptions): Promise<void> {
     } else {
       body = "\n  로딩 중...\n";
     }
-    const ctxLine =
-      liveGames.length > 1
-        ? `\n  [${idx + 1}/${liveGames.length}] ${liveGames[idx]!.awayTeamName} vs ${liveGames[idx]!.homeTeamName}`
-        : "";
-    const out = `${body + ctxLine}\n`;
+    // 다른 경기 정보는 프레임 내 티커 행이 담당 — 별도 컨텍스트 줄 불필요.
+    const out = `${body}\n`;
 
     // overwrite frame: home cursor, clear each line as we go
     process.stdout.write(HOME);
@@ -255,13 +254,22 @@ export async function watch(opts: WatchOptions): Promise<void> {
     }
   };
 
-  // periodic refresh — BEFORE 가 STARTED 로 전환되거나 새 경기가 시작되는 걸 따라잡는다.
+  // periodic refresh — BEFORE→STARTED 전환, 새 경기 시작, 티커의 다른 경기
+  // 점수 갱신을 따라잡는다. relay 폴링과 독립된 30초 주기.
+  const SCHEDULE_POLL_MS = 30_000;
+  let lastScheduleFetch = Date.now();
   const refreshSchedule = async () => {
     if (opts.fixtureRelay) return; // fixture 모드에서는 일정 갱신이 의미 없음
     try {
       const all = await fetchSchedule(todayDate());
       const playable = all.filter((g) => isPlayable(g.statusCode));
-      if (playable.length > 0) liveGames = playable;
+      if (playable.length > 0) {
+        // 목록이 바뀌어도 보던 경기를 계속 가리키도록 gameId 로 재탐색.
+        const curId = liveGames[idx]?.gameId;
+        liveGames = playable;
+        const found = liveGames.findIndex((g) => g.gameId === curId);
+        idx = found >= 0 ? found : Math.min(idx, liveGames.length - 1);
+      }
     } catch {
       // ignore
     }
@@ -283,7 +291,10 @@ export async function watch(opts: WatchOptions): Promise<void> {
   const tick = async () => {
     if (stopped) return;
     await poll();
-    if (Date.now() - lastFetch > 60_000) await refreshSchedule();
+    if (Date.now() - lastScheduleFetch > SCHEDULE_POLL_MS) {
+      await refreshSchedule();
+      lastScheduleFetch = Date.now();
+    }
     timer = setTimeout(tick, opts.intervalSec * 1000);
   };
   timer = setTimeout(tick, opts.intervalSec * 1000);

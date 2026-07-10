@@ -1,8 +1,8 @@
 // watch 화면 위젯 모음 — 전부 "입력 → string[]|string" 순수 함수.
 // render.ts 와의 순환 import 를 피하기 위해 색 함수는 파라미터로 받는다.
 import pc from "picocolors";
-import { trimToWidth, visualWidth } from "./text.ts";
-import type { PitchMark } from "./types.ts";
+import { padEnd, padStart, trimToWidth, visualWidth } from "./text.ts";
+import type { LineupSlot, PitchMark } from "./types.ts";
 
 export interface TeamSide {
   name: string;
@@ -149,4 +149,27 @@ export function strikeZoneChart(pitches: PitchMark[], width: number): string[] {
     out.push(listPart ? `${chartRows[r]}  ${listPart}` : chartRows[r]!);
   }
   return out;
+}
+
+// ─── 타순표 ─────────────────────────────────────────────────────
+// 공격팀 타순. 현재 타자는 ▸ + bold + 팀색 하이라이트.
+//   ▸3 좌 김태연     .333  1-3
+export function lineupRows(
+  slots: LineupSlot[],
+  currentPcode: string | null,
+  highlight: (s: string) => string,
+  width: number
+): string[] {
+  return slots.map((s) => {
+    const isCurrent = currentPcode != null && s.pcode === currentPcode;
+    const marker = isCurrent ? "▸" : " ";
+    const pos = padEnd(s.pos, 2); // 한글 포지션(2칸)과 숫자 포지션(1칸) 정렬
+    const name = padEnd(trimToWidth(s.name, 10), 10);
+    const avg = padStart(s.todayAvg ?? "-", 5);
+    const line = trimToWidth(
+      `${marker}${s.batOrder} ${pos} ${name} ${avg}  ${s.hitAb ?? ""}`,
+      width
+    );
+    return isCurrent ? pc.bold(highlight(line)) : line;
+  });
 }

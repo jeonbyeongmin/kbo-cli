@@ -342,3 +342,37 @@ describe("renderGame 높이 인지 (rows 예산)", () => {
     }
   });
 });
+
+describe("renderGame 멀티게임 티커", () => {
+  const other = {
+    gameId: "G2",
+    categoryId: "kbo",
+    homeTeamCode: "OB",
+    homeTeamName: "두산",
+    homeTeamScore: 5,
+    awayTeamCode: "LG",
+    awayTeamName: "LG",
+    awayTeamScore: 3,
+    statusCode: "STARTED",
+    statusInfo: "7회말",
+    gameDateTime: "2026-05-02T18:30:00",
+    cancel: false,
+    suspended: false,
+    currentInning: "7회말",
+  } as const;
+
+  test("others 가 있으면 푸터 위 티커 행이 생긴다", () => {
+    const out = strip(renderGame(makeStarted(), { layout: "normal", others: [other] }));
+    expect(out).toContain("3-5");
+    expect(out).toContain("●7회말");
+    // 구분선이 티커+푸터로 2개
+    const seps = out.split("\n").filter((l) => /^├─+┤$/.test(l));
+    expect(seps.length).toBe(2);
+  });
+
+  test("others 없으면 티커 행 없음", () => {
+    const out = strip(renderGame(makeStarted(), { layout: "normal" }));
+    const seps = out.split("\n").filter((l) => /^├─+┤$/.test(l));
+    expect(seps.length).toBe(1);
+  });
+});
