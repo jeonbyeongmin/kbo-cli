@@ -9,7 +9,7 @@
 
 ```bash
 # 일회 실행
-npx kbo watch
+npx kbo-cli watch
 
 # 전역 설치
 npm i -g kbo-cli
